@@ -1,7 +1,7 @@
 from recon.core import framework
 import time
 import urllib.parse
-
+import json
 
 class TwitterMixin(object):
 
@@ -40,6 +40,30 @@ class TwitterMixin(object):
             if 'next_results' in jsonobj['search_metadata']:
                 max_id = urllib.parse.parse_qs(jsonobj['search_metadata']['next_results'][1:])['max_id'][0]
                 payload['max_id'] = max_id
+                continue
+            break
+        return results
+
+    def followers_twitter_api(self, payload, limit=False):
+        headers = {'Authorization': f"Bearer {self.get_twitter_oauth_token()}"}
+        url = 'https://api.twitter.com/1.1/followers/list.json'
+        results = []
+        count = 0; #provide as many results as there is to not exceed limit
+        rate_limit = 15
+        while count < 15:
+            resp = self.request('GET', url, params=payload, headers=headers)
+            if limit:
+                # app auth rate limit for followers/users is 15/15min
+                time.sleep(5)
+            jsonobj = resp.json()
+            for item in ['error', 'errors']:
+                if item in jsonobj:
+                    raise framework.FrameworkException(jsonobj[item])
+
+            results += jsonobj['users']
+            if 'next_cursor' in jsonobj and jsonobj['next_cursor'] != 0:
+                payload['cursor'] = jsonobj['next_cursor']
+                count += 1
                 continue
             break
         return results

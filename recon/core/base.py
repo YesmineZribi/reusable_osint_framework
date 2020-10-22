@@ -63,7 +63,9 @@ class Recon(framework.Framework):
         # set path variables
         self.app_path = framework.Framework.app_path = sys.path[0]
         self.core_path = framework.Framework.core_path = os.path.join(self.app_path, 'core')
-        self.home_path = framework.Framework.home_path = os.path.join(os.path.expanduser('~'), '.recon-ng')
+        #self.home_path = framework.Framework.home_path = os.path.join(os.path.expanduser('~'), '.recon-ng')
+        # self.home_path = framework.Framework.home_path = os.path.join(os.path.dirname(os.path.abspath(self.app_path)), '.recon-ng')
+        self.home_path = framework.Framework.home_path = os.path.join(os.path.abspath(self.app_path), '.recon-ng')
         self.mod_path = framework.Framework.mod_path = os.path.join(self.home_path, 'modules')
         self.data_path = framework.Framework.data_path = os.path.join(self.home_path, 'data')
         self.spaces_path = framework.Framework.spaces_path = os.path.join(self.home_path, 'workspaces')
@@ -900,6 +902,6 @@ class Mode(object):
    CLI     = 1
    WEB     = 2
    JOB     = 3
-   
+
    def __init__(self):
        raise NotImplementedError('This class should never be instantiated.')

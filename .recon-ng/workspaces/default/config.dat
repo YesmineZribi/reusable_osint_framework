@@ -1,0 +1,22 @@
+{
+    "recon/profiles-profiles/twitter_mentions": {
+        "SOURCE": "default"
+    },
+    "social-networks/twitter_followers": {
+        "SOURCE": "Jasmine52468952"
+    },
+    "twitter/twitter_user": {
+        "SCREEN_NAME": "twitterdev",
+        "SOURCE_TYPE": "screen_name",
+        "SOURCE": "@AsmaZribi1",
+        "USER_INFO": "true-x",
+        "COUNT": 200,
+        "USER_FOLLOWERS": true
+    },
+    "twitter/twitter_tweet": {
+        "SEARCH_FOR_TWEETS": true,
+        "TWEET_IDS": "1314575809722699776,1309191544549904384,1309191031288729602",
+        "TWEET_ID": 327473909412814850,
+        "SLEEP_TIME": 5
+    }
+}
