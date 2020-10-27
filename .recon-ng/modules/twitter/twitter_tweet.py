@@ -36,6 +36,7 @@ class Module(BaseModule):
             ('get_retweets',False, False, 'Set to true to get retweets of the tweet with the specified tweet_id'),
             ('get_retweeters',False, False, 'Set to true to get user info of users who retweeted the tweet with the specified tweet_id'),
             ('sleep_time', 2, False, 'Set how much time to sleep if rate limit is reached, default is 2 minutes, max is 15'),
+            ('default', True, False, 'Set this to true to use default settings for all recon (useful for running module from a script)')
         ),
     }
 
@@ -111,7 +112,7 @@ class Module(BaseModule):
 
         self.verbose(f'Getting status with id: {id_str}')
         #Ask user to use default settings or customize input
-        user = input("Use default settings (y/n)?: ")
+        user = input("Use default settings (y/n)?: ") if not (self.options['default']) else "yes"
         default = True #Flag variable
         if user.lower() in "no":
             default = False
@@ -156,8 +157,13 @@ class Module(BaseModule):
             with open(tweet_info_file, 'w') as file:
                 file.write(json.dumps(result._json, indent=3, sort_keys=True)) #Dump results in the file
 
-        except tweepy.TweepError:
-            print(tweepy.tweet_path.reponse.text)
+        except tweepy.TweepError as e:
+            if(e.api_code == 429):
+                sleep_time = str(self.options['sleep_time'])
+                self.alert(f'Rate limit reached, sleeping for {sleep_time} minutes') #report limit reached
+                time.sleep(self.options['sleep_time'] * 60)
+            else:
+                print(e.reason)
 
 
 
@@ -173,7 +179,7 @@ class Module(BaseModule):
             os.makedirs(statuses_lookup_path,mode=0o777)
 
         #Ask user to use default settings or customize input
-        user = input("Use default settings (y/n)?: ")
+        user = input("Use default settings (y/n)?: ") if not(self.options['default']) else "yes"
         default = True #Flag variable
         if user.lower() in "no":
             default = False
@@ -242,9 +248,13 @@ class Module(BaseModule):
                     with open(tweet_info_file, 'w') as file:
                         file.write(json.dumps(status._json, indent=3, sort_keys=True)) #Dump results in the file
 
-
-        except tweepy.TweepError:
-            print(tweepy.tweet_path.reponse.text)
+        except tweepy.TweepError as e:
+            if(e.api_code == 429):
+                sleep_time = str(self.options['sleep_time'])
+                self.alert(f'Rate limit reached, sleeping for {sleep_time} minutes') #report limit reached
+                time.sleep(self.options['sleep_time'] * 60)
+            else:
+                print(e.reason)
 
 
     def convert_to_float(self,value):
@@ -348,8 +358,13 @@ class Module(BaseModule):
             with open(search_result_file, 'w') as file:
                 file.write(json.dumps(tweets_returned, indent=3, sort_keys=True)) #Dump results in the file
 
-        except tweepy.TweepError:
-            print(tweepy.tweet_path.reponse.text)
+        except tweepy.TweepError as e:
+            if(e.api_code == 429):
+                sleep_time = str(self.options['sleep_time'])
+                self.alert(f'Rate limit reached, sleeping for {sleep_time} minutes') #report limit reached
+                time.sleep(self.options['sleep_time'] * 60)
+            else:
+                print(e.reason)
 
 
     def get_retweeters(self):
@@ -369,8 +384,13 @@ class Module(BaseModule):
             with open(retweeters_file,'w') as file:
                 for id in returned_ids:
                     file.write("%s\n" % id)
-        except tweepy.TweepError:
-            print(tweepy.tweet_path.reponse.text)
+        except tweepy.TweepError as e:
+            if(e.api_code == 429):
+                sleep_time = str(self.options['sleep_time'])
+                self.alert(f'Rate limit reached, sleeping for {sleep_time} minutes') #report limit reached
+                time.sleep(self.options['sleep_time'] * 60)
+            else:
+                print(e.reason)
 
     def get_retweets(self):
         id_str = str(self.options['tweet_id'])
@@ -382,7 +402,7 @@ class Module(BaseModule):
 
         #Ask user for default/custom input
         #Ask user to use default settings or customize input
-        user = input("Use default settings (y/n)?: ")
+        user = input("Use default settings (y/n)?: ") if not(self.options['default']) else "yes"
         default = True #Flag variable
         if user.lower() in "no":
             default = False
@@ -436,8 +456,13 @@ class Module(BaseModule):
                     with open(retweet_info_file, 'w') as file:
                         file.write(json.dumps(status, indent=3, sort_keys=True)) #Dump results in the file
 
-        except tweepy.TweepError:
-            print(tweepy.tweet_path.reponse.text)
+        except tweepy.TweepError as e:
+            if(e.api_code == 429):
+                sleep_time = str(self.options['sleep_time'])
+                self.alert(f'Rate limit reached, sleeping for {sleep_time} minutes') #report limit reached
+                time.sleep(self.options['sleep_time'] * 60)
+            else:
+                print(e.reason)
 
     def limit_handled(self,cursor):
         while True:

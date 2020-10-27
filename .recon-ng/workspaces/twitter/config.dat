@@ -1,0 +1,12 @@
+{
+    "twitter/twitter_user": {
+        "SOURCE": "@Jasmine52468952",
+        "SLEEP_TIME": 10,
+        "SKIP_STATUS": true,
+        "SOURCE_TYPE": "screen_name",
+        "USER_INFO": false,
+        "USER_FRIENDS": false,
+        "USER_FAVORITES": true,
+        "ANALYSIS_RECON": true
+    }
+}

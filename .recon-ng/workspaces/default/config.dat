@@ -7,16 +7,23 @@
     },
     "twitter/twitter_user": {
         "SCREEN_NAME": "twitterdev",
-        "SOURCE_TYPE": "screen_name",
-        "SOURCE": "@AsmaZribi1",
-        "USER_INFO": "true-x",
+        "SOURCE_TYPE": "id",
+        "SOURCE": "1097133672099209217,3159148494",
         "COUNT": 200,
-        "USER_FOLLOWERS": true
+        "USERNAME_OR_ID": "@AsmaZribi1,@CriticalRole",
+        "USER_FAVORITES": true,
+        "SLEEP_TIME": 5,
+        "USERS_LOOKUP": true,
+        "USER_FRIENDS": true,
+        "USER_FOLLOWERS": true,
+        "USER_TIMELINE": true,
+        "USER_INFO": true
     },
     "twitter/twitter_tweet": {
-        "SEARCH_FOR_TWEETS": true,
         "TWEET_IDS": "1314575809722699776,1309191544549904384,1309191031288729602",
         "TWEET_ID": 327473909412814850,
-        "SLEEP_TIME": 5
+        "SLEEP_TIME": 5,
+        "GET_STATUS": true,
+        "DEFAULT": true
     }
 }
