@@ -49,13 +49,11 @@ class Module(BaseModule):
     # the third parameter is required if a value is returned from the "module_pre" method
     def module_run(self):
         self.output("Purging database...")
-        self.output("Deleting all records from account")
         self.query('DELETE FROM users')
-        self.output("Deleting all records from followers")
         self.query('DELETE FROM followers')
-        self.output("Deleting all records from friends")
         self.query('DELETE FROM posts')
-        self.output("Deleting all records from favorites")
         self.query('DELETE FROM favorites')
-        self.output("Deleting all records from timeline")
         self.query('DELETE FROM mentions')
+        self.query('DELETE FROM reshares')
+        self.query('DELETE FROM comments')
+        

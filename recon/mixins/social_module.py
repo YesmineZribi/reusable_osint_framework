@@ -3,6 +3,8 @@ from recon.core.module import BaseModule
 from abc import ABC, abstractmethod
 import os
 import sys
+import traceback
+import json
 
 class SocialModule(ABC,BaseModule):
 
@@ -36,6 +38,7 @@ class SocialModule(ABC,BaseModule):
         self.create_user_schema()
         self.create_post_schema()
         self.create_followers_schema()
+        self.create_favorites_schema()
         self.create_mentions_schema()
         self.create_reshare_schema()
         self.create_comment_schema()
@@ -234,6 +237,7 @@ class SocialModule(ABC,BaseModule):
         CREATE TABLE IF NOT EXISTS reshares(
         post_id bigint,
         user_id bigint,
+        created_at TEXT,
         PRIMARY KEY (post_id, user_id),
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (post_id) REFERENCES posts(id)
@@ -260,13 +264,14 @@ class SocialModule(ABC,BaseModule):
         Adds the user to the user table
         '''
         self.query(f"INSERT OR REPLACE INTO users (id,screen_name) VALUES ({user_id},\'{screen_name}\')")
-        print(f'({user_id},{screen_name}) added to users table')
 
-    def add_post(self, post_id, authod_id, text, date):
+    def add_post(self, post_id, author_id, text, date):
         '''
         Adds post to the post table
         '''
-        pass
+        # single quotes need to be replaces by ''
+        text = text.replace("'",r"''")
+        self.query(f"INSERT OR REPLACE INTO posts (id,author_id,text,created_at) VALUES ({post_id},{author_id},\'{text}\',\"{date}\")")
 
     def add_follower(self, user_id,follower_id):
         '''
@@ -275,7 +280,6 @@ class SocialModule(ABC,BaseModule):
         Note: for friends, follower_id = target_id and user_id = friend_id
         '''
         self.query(f'INSERT OR REPLACE into followers (user_id,follower_id) VALUES (\'{user_id}\',\'{follower_id}\')')
-        print(f'({user_id},{follower_id}) added to followers table')
 
     def add_friend(self, user_id, friend_id):
         self.add_follower(friend_id, user_id)
@@ -284,20 +288,21 @@ class SocialModule(ABC,BaseModule):
         '''
         Adds a post favored by user_id in the favorites table
         '''
-        pass
+        self.query(f'INSERT OR REPLACE into favorites (user_id,post_id) VALUES (\'{user_id}\',\'{post_id}\')')
 
-    def add_reshare(self, post_id,user_id):
+    def add_reshare(self, post_id,user_id,date):
         '''
         adds a reshare to the reshare table whereby user with user_id reshared
         a post with post_id
         '''
-        pass
+        self.query(f"INSERT OR REPLACE INTO reshares (post_id,user_id,created_at) VALUES ({post_id},{user_id},\"{date}\")")
 
     def add_mention(self, user_id, mentioned_id,post_id):
         '''
         Adds a mention in the db
         '''
-        pass
+        self.query(f"INSERT OR REPLACE INTO mentions (user_id,mentioned_id,post_id) VALUES ({user_id},{mentioned_id},{post_id})")
+
 
     def add_comment(self, post_id, user_id, text):
         '''
@@ -327,7 +332,6 @@ class SocialModule(ABC,BaseModule):
             self.add_user(friend[0],friend[1])
             self.add_friend(self.id,friend[0])
 
-
     def add_user_followers(self,username):
         #fetch user followers
         path = self.fetch_user_followers(username,self.user_path[self.username])
@@ -339,23 +343,26 @@ class SocialModule(ABC,BaseModule):
             self.add_follower(self.id,follower[0])
 
     def add_user_posts(self,username):
-        #path = fetch_user_timeline(self.username, self.user_path[self.username])
-        #posts = parse_user_timeline(self.username, path)
-        #for post_id,post_info in posts.items():
-        #add_post(post_id,self.id,post_info[0], post_info[1])
-        #might wanna replace with tuples, less user enforcing 
+        #fetch user timeline path
         path = self.fetch_user_timeline(username,self.user_path[self.username])
+        #Parse user timeline json
         posts = self.parse_user_timeline(username,path)
+        #Add to the db
         for post_id,post_info in posts.items():
-            self.add_post(post_id,self.id,post_info['text'],post_info['created_at'])
+            self.add_post(post_id,self.id,post_info[0],post_info[1])
 
     def add_user_favorites(self,username):
-        #path = fetch_user_favorites(self.username, self.user_path[self.username])
-        #favorites = parse_user_favorites(self.username,path)
-        #for favorite_id, favorite_info in favorites:
-        #add_post(favorite_id,favorite_info[0], favorite_info[1], favorite_info[2])
-        #add_favorite(self.id, favorite_id)
-        pass
+        #fetch user favorites path
+        path = self.fetch_user_favorites(username,self.user_path[self.username])
+        #fetch user favorite/liked posts
+        favorites = self.parse_user_favorites(username,path)
+        for favorite_id,favorite_info in favorites.items():
+            #Add author of post to the db
+            self.add_user(favorite_info[0],favorite_info[1])
+            #Add post to the db
+            self.add_post(favorite_id,favorite_info[0],favorite_info[2],favorite_info[3])
+            #Add to favorites
+            self.add_favorite(self.id,favorite_id)
 
     def add_user_mentions(self,username):
         #Query db for all posts with author_id == self.id, return texts that contain @
@@ -363,6 +370,20 @@ class SocialModule(ABC,BaseModule):
         #1 - Clean handle
         #2 - user_id = add_user_info(handle)
         #3 - add_mention(self.id,user_id)
+        path = self.fetch_user_mentions(username,self.user_path[self.username])
+        mentions = self.parse_user_mentions(username,path)
+        for mentioned in mentions:
+            self.add_user(mentioned[0],mentioned[1])
+            self.add_post(mentioned[2],self.id,mentioned[3],mentioned[4])
+            self.add_mention(self.id,mentioned[0],mentioned[2])
+
+    def add_user_reshares(self,username):
+        path = self.fetch_user_reshares(username,self.user_path[self.username])
+        reshared_posts = self.parse_user_reshares(username,path)
+        for reshared_id, reshared_info in reshared_posts.items():
+            self.add_user(reshared_info[0],reshared_info[1])
+            self.add_post(reshared_id,reshared_info[0],reshared_info[2],reshared_info[3])
+            self.add_reshare(reshared_id,self.id,reshared_info[4])
         pass
 
     def add_user_comment(self,username):
@@ -377,10 +398,17 @@ class SocialModule(ABC,BaseModule):
         #add_user_posts(self, self.username)
         #add_user_favorites(self, self.username)
         #add_user_mentions(self, self.username)
+        #add_user_reshares(self.username)
         #add_user_comments(self, self.username)
-        if(self.options['analysis_recon']):
-            self.username = self.handles[0]
-            self.add_user_info(self.username)
-            self.add_user_friends(self.username)
-            self.add_user_followers(self.username)
-            self.add_user_posts(self.username)
+        try:
+            if(self.options['analysis_recon']):
+                self.username = self.handles[0]
+                self.add_user_info(self.username)
+                self.add_user_friends(self.username)
+                self.add_user_followers(self.username)
+                self.add_user_posts(self.username)
+                self.add_user_favorites(self.username)
+                self.add_user_reshares(self.username)
+                self.add_user_mentions(self.username)
+        except:
+            traceback.print_exc()

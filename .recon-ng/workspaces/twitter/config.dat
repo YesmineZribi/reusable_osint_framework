@@ -6,7 +6,9 @@
         "SOURCE_TYPE": "screen_name",
         "USER_INFO": false,
         "USER_FRIENDS": false,
-        "USER_FAVORITES": true,
-        "ANALYSIS_RECON": true
+        "USER_FAVORITES": false,
+        "ANALYSIS_RECON": true,
+        "USER_RESHARES": true,
+        "USER_MENTIONS": true
     }
 }

@@ -32,6 +32,11 @@ class Module(SocialModule):
 
         ),
         'options': SocialModule.meta['options'] + (
+            ('user_info', True, False, 'Set to true to enable collection of user account info'),
+            ('user_followers', False, False, 'Set to true to enable collection of user followers'),
+            ('user_friends', False, False, 'Set to true to enable collection of user friends'),
+            ('user_timeline', False, False, 'Set to true to enable collection of user timeline'),
+            ('user_favorites', False, False, 'Set to true to enable collection of user\'s liked posts'),
             ('users_lookup', False, False, 'Set to true to enable lookup of up to 100 users'),
             ('enable_fetch_all', False, False, 'Set to true to enable bulk account fetching (required to use analysis module)'),
             ('cursor', -1, False, 'Breaks result into pages, -1 to start from first page'),
@@ -84,6 +89,8 @@ class Module(SocialModule):
         elif self.options['users_lookup'] and all(isinstance(x,str) for x in self.handles):
             self.alert("users_lookup enabled temporarly setting source_type to screen_names")
             self.options['source_type'] = 'screen_names'
+
+        self.timeline_path = '' #Keep track of whether fetch_timeline was called
 
 
     def module_run(self):
@@ -219,6 +226,7 @@ class Module(SocialModule):
             file.write(json.dumps(result, indent=3,sort_keys=True)) #write the json result in a file
 
         self.parse_user_timeline(username,user_timeline_file)
+        self.timeline_path = user_timeline_file
         return user_timeline_file
 
     def fetch_user_favorites(self,username,user_path):
@@ -254,10 +262,20 @@ class Module(SocialModule):
         pass
 
     def fetch_user_mentions(self,username,user_path):
-        pass
+        #If timeline was called, get the path
+        self.output(f"Retreiving mentions of {username}")
+        if not self.timeline_path:
+            self.timeline_path = self.fetch_user_timeline(username,user_path)
+
+        return self.timeline_path
 
     def fetch_user_reshares(self,username,user_path):
-        pass
+        #If timeline was called, get the path
+        self.output(f"Retreiving retweets of {username}")
+        if not self.timeline_path:
+            self.timeline_path = self.fetch_user_timeline(username,user_path)
+
+        return self.timeline_path
 
     def limit_handled(self,cursor):
         while True:
@@ -337,10 +355,29 @@ class Module(SocialModule):
 
     def parse_user_mentions(self,username,json_path):
         #Get the timeline
-        #Parse text for @ w/t RT
-        pass
+        posts_info_list = []
+        with open(json_path) as file:
+            posts_info_list = json.load(file)
+        mentions = []
+        for status in posts_info_list:
+            if status['entities']['user_mentions']:
+                for mention in status['entities']['user_mentions']:
+                    mentions.append((mention['id'],mention['screen_name'],status['id'],status['text'],status['created_at']))
+
+        #return [(mentioned_id, mentioned_screen_name, post_id,text,date_mentioned)]
+        return mentions
 
     def parse_user_reshares(self,username,json_path):
         #Get the timeline
         #parse text for RT @
-        pass
+        posts_info_list = []
+        with open(json_path) as file:
+            posts_info_list = json.load(file)
+        retweeted_posts = {}
+        for status in posts_info_list:
+            if status['text'].startswith('RT'):
+                retweeted_posts[status['id']] = (status['retweeted_status']['user']['id'], status['retweeted_status']['user']['screen_name'],
+                status['retweeted_status']['text'], status['retweeted_status']['created_at'], status['created_at'])
+        #Return dict
+        #{'post_id': (o_author_id, o_author_screen_name, text, o_created_at, rt_created_at)}
+        return retweeted_posts
