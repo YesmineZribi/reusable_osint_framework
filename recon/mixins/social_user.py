@@ -1,5 +1,5 @@
 from recon.core import framework
-from recon.mixins.social_post import SocialPost
+from recon.mixins.social_post import *
 from collections import defaultdict
 
 class SocialUser(framework.Framework):
@@ -15,13 +15,22 @@ class SocialUser(framework.Framework):
         #Clean up screen_name
         self.screen_name = self.screen_name[1:] if self.screen_name and self.screen_name.startswith('@') else self.screen_name
         #Initialize other variables
-        self.friends = []
-        self.followers = []
-        self.timeline = []
-        self.reshares = []
-        self.mentions = defaultdict(list)
+        self.friends = [] #LSocialUser[]
+        self.followers = [] #SocialUser[]
+        self.timeline = [] #Post[]
+        self.reshares = [] #Post[]
+        self.mentions = defaultdict(list) #{SocialUser:Post[]}
         #Not yet implemented
         self.comments = []
+
+    def get_all(self):
+        self.get_id()
+        self.get_friends()
+        self.get_followers()
+        self.get_timeline()
+        self.get_reshares()
+        self.get_mentions()
+        #self.get_comments()
 
     def get_id(self):
         if self.id:
@@ -82,13 +91,17 @@ class SocialUser(framework.Framework):
     def get_reshares(self):
         if self.reshares:
             return self.reshares
-        #Get id of reshared posts
+
         if not self.id:
             self.get_id()
 
         response_list = self.query(f"SELECT posts.id,posts.author_id,posts.text,posts.created_at,reshares.created_at from posts INNER JOIN reshares ON posts.id = reshares.post_id WHERE reshares.user_id = {self.id} ")
+        #Query from timeline posts where created_at == reshared.created_at
+        #save in list
         for post_tup in response_list:
-            self.reshares.append(SocialPost(post_tup[0],post_tup[1],post_tup[2],post_tup[3],True,post_tup[4]))
+            self.reshares.append(SocialPost(post_tup[0],post_tup[1],post_tup[2],post_tup[3]))
+
+        #Create a reshare object
         return self.reshares
 
     def get_mentions(self):
@@ -127,3 +140,33 @@ class SocialUser(framework.Framework):
     def __hash__(self):
         '''Overridden so we can use class as dict keys'''
         return hash(self.id)
+
+class Followers(framework.Framework):
+    def __init__(self, user,followers):
+        """
+        user: SocialUser
+        followers: SocialUser[]
+        """
+        framework.Framework.__init__(self, 'social_user')
+        self.user = user
+        self.followers = followers
+
+class Friends(framework.Framework):
+    def __init__(self, user,friends):
+        """
+        user: SocialUser
+        friends: SocialUser[]
+        """
+        framework.Framework.__init__(self, 'social_user')
+        self.user = user
+        self.friends = friends
+
+class Timeline(framework.Framework):
+    def __init__(self, user,posts):
+        """
+        user: SocialUser
+        posts: SocialPost[]
+        """
+        framework.Framework.__init__(self, 'social_user')
+        self.user = user
+        self.posts = posts

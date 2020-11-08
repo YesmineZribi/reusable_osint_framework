@@ -1,5 +1,5 @@
 # module required for framework integration and all social network modules
-from recon.mixins.social_module import SocialModule
+from recon.mixins.social_module import *
 # mixins for desired functionality
 # module specific imports
 import tweepy
@@ -132,6 +132,7 @@ class Module(SocialModule):
                 print(e.reason)
 
         return user_info_file
+
 
     def fetch_users_lookup(self):
         paths = {}
@@ -293,9 +294,9 @@ class Module(SocialModule):
         user_info_dict = {}
         with open(json_path) as file:
             user_info_dict = json.load(file)
-        #Parse for id and screen_name
+
         #Return tuple (id, screen_name)
-        return (user_info_dict['id'],user_info_dict['screen_name'])
+        return SocialUser(id=user_info_dict['id'],screen_name=user_info_dict['screen_name'])
 
     def parse_user_friends(self, username, json_path):
         #Open the json path
@@ -304,9 +305,7 @@ class Module(SocialModule):
             friends_info_list = json.load(file)
         friends = []
         for friend in friends_info_list:
-            friends.append((friend['id'],friend['screen_name']))
-        #Return list of tuples
-        #[(friend_id, friend_screen_name)]
+            friends.append(SocialUser(id=friend['id'],screen_name=friend['screen_name']))
         return friends
 
     def parse_user_followers(self, username, json_path):
@@ -316,9 +315,7 @@ class Module(SocialModule):
             followers_info_list = json.load(file)
         followers = []
         for follower in followers_info_list:
-            followers.append((follower['id'],follower['screen_name']))
-        #Return list of tuples
-        #[(follower_id, follower_screen_name)]
+            followers.append(SocialUser(id=follower['id'],screen_name=follower['screen_name']))
         return followers
 
     def parse_user_timeline(self, username, json_path):
@@ -326,11 +323,9 @@ class Module(SocialModule):
         posts_info_list = []
         with open(json_path) as file:
             posts_info_list = json.load(file)
-        posts = {}
+        posts = []
         for status in posts_info_list:
-            posts[status['id']] = (status['text'],status['created_at'])
-        #Return dict
-        #{'post_id': (text,created_at) }
+            posts.append(SocialPost(post_id=status['id'],text=status['text'],created_at=status['created_at']))
         return posts
 
     def parse_user_favorites(self, username, json_path):
@@ -338,12 +333,10 @@ class Module(SocialModule):
         posts_info_list = []
         with open(json_path) as file:
             posts_info_list = json.load(file)
-        posts = {}
+        posts = []
         for status in posts_info_list:
-            posts[status['id']] = (status['user']['id'], status['user']['screen_name'],
-            status['text'], status['created_at'])
-        #Return dict
-        #{'post_id': (author_id, author_screen_name, text, created_at)}
+            author = SocialUser(id=status['user']['id'],screen_name=status['user']['screen_name'])
+            posts.append(SocialPost(post_id=status['id'],author=author,text=status['text'],created_at=status['created_at']))
         return posts
 
     def parse_user_comments(self,username, json_path):
@@ -362,9 +355,10 @@ class Module(SocialModule):
         for status in posts_info_list:
             if status['entities']['user_mentions']:
                 for mention in status['entities']['user_mentions']:
-                    mentions.append((mention['id'],mention['screen_name'],status['id'],status['text'],status['created_at']))
+                    post = SocialPost(status['id'],status['text'],status['created_at'])
+                    mentioned = SocialUser(id=mention['id'],screen_name=mention['screen_name'])
+                    mentions.append(Mention(mentioned=mentioned,post=post))
 
-        #return [(mentioned_id, mentioned_screen_name, post_id,text,date_mentioned)]
         return mentions
 
     def parse_user_reshares(self,username,json_path):
@@ -373,11 +367,11 @@ class Module(SocialModule):
         posts_info_list = []
         with open(json_path) as file:
             posts_info_list = json.load(file)
-        retweeted_posts = {}
+        retweeted_posts = []
         for status in posts_info_list:
             if status['text'].startswith('RT'):
-                retweeted_posts[status['id']] = (status['retweeted_status']['id'],status['retweeted_status']['user']['id'], status['retweeted_status']['user']['screen_name'],
-                status['retweeted_status']['text'], status['retweeted_status']['created_at'], status['created_at'])
-        #Return dict
-        #{'post_id': (o_post_id, o_author_id, o_author_screen_name, text, o_created_at, rt_created_at)}
+                original_author = SocialUser(id=status['retweeted_status']['user']['id'],screen_name=status['retweeted_status']['user']['screen_name'])
+                original_post = SocialPost(status['retweeted_status']['id'],original_author,status['retweeted_status']['text'],status['retweeted_status']['created_at'])
+                retweeted_post = SocialPost(status['id'],text=status['text'],created_at=status['created_at'])
+                retweeted_posts.append(Reshare(reshared_post=retweeted_post,original_post=original_post))
         return retweeted_posts

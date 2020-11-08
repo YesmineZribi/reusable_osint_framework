@@ -10,5 +10,9 @@
         "ANALYSIS_RECON": true,
         "USER_RESHARES": true,
         "USER_MENTIONS": true
+    },
+    "analysis/social_analysis": {
+        "SOURCE_TYPE": "screen_name",
+        "USERNAMES": "@AsmaZribi1"
     }
 }

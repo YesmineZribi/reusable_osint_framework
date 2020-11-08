@@ -1,5 +1,7 @@
 # module required for framework integration
 from recon.core.module import BaseModule
+from recon.mixins.social_user import SocialUser
+from recon.mixins.social_post import *
 from abc import ABC, abstractmethod
 import os
 import sys
@@ -77,28 +79,18 @@ class SocialModule(ABC,BaseModule):
     @abstractmethod
     def fetch_user_info(self, username, user_path):
         '''
-        Stores in the database a dict containing account info
-        ex: account_info = {
-            'screen_name': screen_name
-            'id': id
-
-        }
-        Output to user path for json file with more detailed info
+        username: str
+        user_path: str
+        Retuns the path at which json is stored
         '''
         pass
 
     @abstractmethod
     def fetch_user_followers(self, username, user_path):
-        '''
-        '''
         pass
 
     @abstractmethod
     def fetch_user_friends(self, username, user_path):
-        '''
-        Stores in database dict containing screen_names and ids of followers_
-        Output user path for json file with more detailed info
-        '''
         pass
 
 
@@ -232,10 +224,11 @@ class SocialModule(ABC,BaseModule):
         CREATE TABLE IF NOT EXISTS reshares(
         post_id bigint,
         user_id bigint,
-        created_at TEXT,
+        reshared_id bigint,
         PRIMARY KEY (post_id, user_id),
         FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (post_id) REFERENCES posts(id)
+        FOREIGN KEY (post_id) REFERENCES posts(id),
+        FOREIGN KEY (reshared_id) REFERENCES posts(id)
         )
         """)
 
@@ -286,12 +279,12 @@ class SocialModule(ABC,BaseModule):
         '''
         self.query(f'INSERT OR REPLACE into favorites (user_id,post_id) VALUES (\'{user_id}\',\'{post_id}\')')
 
-    def add_reshare(self, post_id,user_id,date):
+    def add_reshare(self, post_id,user_id,reshared_id):
         '''
         adds a reshare to the reshare table whereby user with user_id reshared
         a post with post_id
         '''
-        self.query(f"INSERT OR REPLACE INTO reshares (post_id,user_id,created_at) VALUES ({post_id},{user_id},\"{date}\")")
+        self.query(f"INSERT OR REPLACE INTO reshares (post_id,user_id,reshared_id) VALUES ({post_id},{user_id},{reshared_id})")
 
     def add_mention(self, user_id, mentioned_id,post_id):
         '''
@@ -311,11 +304,11 @@ class SocialModule(ABC,BaseModule):
         #Fetch user info
         path = self.fetch_user_info(username, self.user_path[username])
         #Parse for id and screen_name
-        (id,screen_name) = self.parse_user_info(username, path)
-        self.id = id
-        self.screen_name = screen_name
+        user = self.parse_user_info(username, path)
+        self.id = user.id
+        self.screen_name = user.screen_name
         #Add info to db
-        self.add_user(id,screen_name)
+        self.add_user(user.id,user.screen_name)
         return id
 
     def add_user_friends(self,username):
@@ -325,8 +318,8 @@ class SocialModule(ABC,BaseModule):
         friends = self.parse_user_friends(username,path)
         #Add to the db
         for friend in friends:
-            self.add_user(friend[0],friend[1])
-            self.add_friend(self.id,friend[0])
+            self.add_user(friend.id,friend.screen_name)
+            self.add_friend(self.id,friend.id)
 
     def add_user_followers(self,username):
         #fetch user followers
@@ -335,8 +328,8 @@ class SocialModule(ABC,BaseModule):
         followers = self.parse_user_followers(username,path)
         #Add to the db
         for follower in followers:
-            self.add_user(follower[0],follower[1])
-            self.add_follower(self.id,follower[0])
+            self.add_user(follower.id,follower.screen_name)
+            self.add_follower(self.id,follower.id)
 
     def add_user_posts(self,username):
         #fetch user timeline path
@@ -344,21 +337,21 @@ class SocialModule(ABC,BaseModule):
         #Parse user timeline json
         posts = self.parse_user_timeline(username,path)
         #Add to the db
-        for post_id,post_info in posts.items():
-            self.add_post(post_id,self.id,post_info[0],post_info[1])
+        for post in posts:
+            self.add_post(post.post_id,self.id,post.text,post.created_at)
 
     def add_user_favorites(self,username):
         #fetch user favorites path
         path = self.fetch_user_favorites(username,self.user_path[self.username])
         #fetch user favorite/liked posts
         favorites = self.parse_user_favorites(username,path)
-        for favorite_id,favorite_info in favorites.items():
+        for favorite in favorites:
             #Add author of post to the db
-            self.add_user(favorite_info[0],favorite_info[1])
+            self.add_user(favorite.author.id,favorite.author.screen_name)
             #Add post to the db
-            self.add_post(favorite_id,favorite_info[0],favorite_info[2],favorite_info[3])
+            self.add_post(favorite.post_id,favorite.author.id,favorite.text,favorite.created_at)
             #Add to favorites
-            self.add_favorite(self.id,favorite_id)
+            self.add_favorite(self.id,favorite.post_id)
 
     def add_user_mentions(self,username):
         #fetch user mentions path
@@ -367,27 +360,27 @@ class SocialModule(ABC,BaseModule):
         mentions = self.parse_user_mentions(username,path)
         for mentioned in mentions:
             #Add the mentioned user
-            self.add_user(mentioned[0],mentioned[1])
+            self.add_user(mentioned.mentioned.id,mentioned.mentioned.screen_name)
             #Add the post in which the user was mentioned
-            self.add_post(mentioned[2],self.id,mentioned[3],mentioned[4])
+            self.add_post(mentioned.post.post_id,self.id,mentioned.post.text,mentioned.post.created_at)
             #Add the mention
-            self.add_mention(self.id,mentioned[0],mentioned[2])
+            self.add_mention(self.id,mentioned.mentioned.id,mentioned.post.post_id)
 
     def add_user_reshares(self,username):
         path = self.fetch_user_reshares(username,self.user_path[self.username])
         reshared_posts = self.parse_user_reshares(username,path)
-        for reshared_id, reshared_info in reshared_posts.items():
+        for reshared in reshared_posts:
             #Add original author to user table
             #(o_author_id,o_author_screen_name)
-            self.add_user(reshared_info[1],reshared_info[2])
+            self.add_user(reshared.original_post.author.id,reshared.original_post.author.screen_name)
             #Add original tweet to posts table
-            #(o_post_id,o_author_id,text,o_created_at)
-            self.add_post(reshared_info[0],reshared_info[1],reshared_info[3],reshared_info[4])
+            #(o_post_id,o_author_id,o_text,o_created_at)
+            self.add_post(reshared.original_post.post_id,reshared.original_post.author.id,reshared.original_post.text,reshared.original_post.created_at)
             #Add retweeted post to posts table
-            #(reshared_id,this user,text,rt_created_at)
-            self.add_post(reshared_id,self.id,reshared_info[3],reshared_info[5])
+            #(reshared_id,this user,rt_text,rt_created_at)
+            self.add_post(reshared.reshared_post.post_id,self.id,reshared.reshared_post.text,reshared.reshared_post.created_at)
             #Add the reshare relationship
-            self.add_reshare(reshared_id,self.id,reshared_info[4])
+            self.add_reshare(reshared.original_post.post_id,self.id,reshared.reshared_post.post_id)
 
     def add_user_comment(self,username):
         pass
@@ -407,11 +400,11 @@ class SocialModule(ABC,BaseModule):
             if(self.options['analysis_recon']):
                 self.username = self.handles[0]
                 self.add_user_info(self.username)
-                self.add_user_friends(self.username)
-                self.add_user_followers(self.username)
-                self.add_user_posts(self.username)
-                self.add_user_favorites(self.username)
+                # self.add_user_friends(self.username)
+                # self.add_user_followers(self.username)
+                # self.add_user_posts(self.username)
+                # self.add_user_favorites(self.username)
                 self.add_user_reshares(self.username)
-                self.add_user_mentions(self.username)
+                # self.add_user_mentions(self.username)
         except:
             traceback.print_exc()
