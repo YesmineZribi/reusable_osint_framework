@@ -21,11 +21,6 @@ class SocialModule(ABC,BaseModule):
 
         ),
         'options': (
-            ('user_info', True, False, 'Set to true to enable collection of user account info'),
-            ('user_followers', False, False, 'Set to true to enable collection of user followers'),
-            ('user_friends', False, False, 'Set to true to enable collection of user friends'),
-            ('user_timeline', False, False, 'Set to true to enable collection of user timeline'),
-            ('user_favorites', False, False, 'Set to true to enable collection of user\'s liked posts'),
             ('source_type', 'id', True, 'Set the type of the source: user_id or screen_name or id'),
             ('source', '', True, 'Set to the username(s) or id(s) of a target(s), ie1: username ie2: username1,username2'),
             ('sleep_time', 2, False, 'Set how much time to sleep if rate limit is reached, default is 2 minutes, max is 15'),
@@ -253,6 +248,7 @@ class SocialModule(ABC,BaseModule):
         post_id bigint,
         user_id bigint,
         text TEXT,
+        created_at TEXT,
         PRIMARY KEY (post_id, user_id, text),
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (post_id) REFERENCES posts(id)
@@ -365,26 +361,33 @@ class SocialModule(ABC,BaseModule):
             self.add_favorite(self.id,favorite_id)
 
     def add_user_mentions(self,username):
-        #Query db for all posts with author_id == self.id, return texts that contain @
-        #for each one:
-        #1 - Clean handle
-        #2 - user_id = add_user_info(handle)
-        #3 - add_mention(self.id,user_id)
+        #fetch user mentions path
         path = self.fetch_user_mentions(username,self.user_path[self.username])
+        #fetch users this user mentioned
         mentions = self.parse_user_mentions(username,path)
         for mentioned in mentions:
+            #Add the mentioned user
             self.add_user(mentioned[0],mentioned[1])
+            #Add the post in which the user was mentioned
             self.add_post(mentioned[2],self.id,mentioned[3],mentioned[4])
+            #Add the mention
             self.add_mention(self.id,mentioned[0],mentioned[2])
 
     def add_user_reshares(self,username):
         path = self.fetch_user_reshares(username,self.user_path[self.username])
         reshared_posts = self.parse_user_reshares(username,path)
         for reshared_id, reshared_info in reshared_posts.items():
-            self.add_user(reshared_info[0],reshared_info[1])
-            self.add_post(reshared_id,reshared_info[0],reshared_info[2],reshared_info[3])
+            #Add original author to user table
+            #(o_author_id,o_author_screen_name)
+            self.add_user(reshared_info[1],reshared_info[2])
+            #Add original tweet to posts table
+            #(o_post_id,o_author_id,text,o_created_at)
+            self.add_post(reshared_info[0],reshared_info[1],reshared_info[3],reshared_info[4])
+            #Add retweeted post to posts table
+            #(reshared_id,this user,text,rt_created_at)
+            self.add_post(reshared_id,self.id,reshared_info[3],reshared_info[5])
+            #Add the reshare relationship
             self.add_reshare(reshared_id,self.id,reshared_info[4])
-        pass
 
     def add_user_comment(self,username):
         pass

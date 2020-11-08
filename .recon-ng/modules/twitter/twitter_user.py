@@ -376,8 +376,8 @@ class Module(SocialModule):
         retweeted_posts = {}
         for status in posts_info_list:
             if status['text'].startswith('RT'):
-                retweeted_posts[status['id']] = (status['retweeted_status']['user']['id'], status['retweeted_status']['user']['screen_name'],
+                retweeted_posts[status['id']] = (status['retweeted_status']['id'],status['retweeted_status']['user']['id'], status['retweeted_status']['user']['screen_name'],
                 status['retweeted_status']['text'], status['retweeted_status']['created_at'], status['created_at'])
         #Return dict
-        #{'post_id': (o_author_id, o_author_screen_name, text, o_created_at, rt_created_at)}
+        #{'post_id': (o_post_id, o_author_id, o_author_screen_name, text, o_created_at, rt_created_at)}
         return retweeted_posts

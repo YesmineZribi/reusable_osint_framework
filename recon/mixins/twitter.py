@@ -5,6 +5,9 @@ import json
 
 class TwitterMixin(object):
 
+    def func(self):
+        self.error("RRR")
+        
     def get_twitter_oauth_token(self):
         token_name = 'twitter_token'
         token = self.get_key(token_name)
