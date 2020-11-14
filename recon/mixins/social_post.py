@@ -18,7 +18,7 @@ class SocialPost(framework.Framework):
         return self.text
 
     def __repr__(self):
-        return f"Post({self.post_id},{self.author_id},{self.created_at})"
+        return f"Post({self.post_id},{self.author},{self.created_at})"
 
 class Reshare(framework.Framework):
     def __init__(self, resharer=None,reshared_post=None,original_post=None):
@@ -32,8 +32,11 @@ class Reshare(framework.Framework):
         self.reshared_post = reshared_post
         self.original_post = original_post
 
+    def __repr__(self):
+        return f"Reshare({self.resharer} => {self.original_post})"
+
 class Mention(framework.Framework):
-    def __init__(self, mentioner=None,mentioned=None,post=None):
+    def __init__(self, mentioner=None, mentioned=None, post=None):
         """
         mentioner: SocialUser
         mentioned: SocialUser
@@ -43,6 +46,9 @@ class Mention(framework.Framework):
         self.mentioner = mentioner
         self.mentioned = mentioned
         self.post = post
+
+    def __repr__(self):
+        return f"Mention({self.mentioner} => {self.mentioned} in {self.post})"
 
 
 class Comment(framework.Framework):

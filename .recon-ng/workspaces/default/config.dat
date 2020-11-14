@@ -7,8 +7,8 @@
     },
     "twitter/twitter_user": {
         "SCREEN_NAME": "twitterdev",
-        "SOURCE_TYPE": "id",
-        "SOURCE": "1097133672099209217,3159148494",
+        "SOURCE_TYPE": "screen_name",
+        "SOURCE": "@Jasmine52468952",
         "COUNT": 200,
         "USERNAME_OR_ID": "@AsmaZribi1,@CriticalRole",
         "USER_FAVORITES": true,

@@ -387,24 +387,18 @@ class SocialModule(ABC,BaseModule):
 
     def module_run(self):
         #If analysis_recon is set to true
-        #self.username = self.handles[0]
-        #add_user_info(self, self.username)
-        #add_user_friends(self, self.username)
-        #add_user_followers(self, self.username)
-        #add_user_posts(self, self.username)
-        #add_user_favorites(self, self.username)
-        #add_user_mentions(self, self.username)
-        #add_user_reshares(self.username)
-        #add_user_comments(self, self.username)
+        #automate the recon process
         try:
-            if(self.options['analysis_recon']):
-                self.username = self.handles[0]
-                self.add_user_info(self.username)
-                # self.add_user_friends(self.username)
-                # self.add_user_followers(self.username)
-                # self.add_user_posts(self.username)
-                # self.add_user_favorites(self.username)
-                self.add_user_reshares(self.username)
-                # self.add_user_mentions(self.username)
+            if self.options['analysis_recon']:
+                for handle in self.handles:
+                    self.username = handle
+                    self.add_user_info(self.username)
+                    self.add_user_friends(self.username)
+                    self.add_user_followers(self.username)
+                    self.add_user_posts(self.username)
+                    self.add_user_favorites(self.username)
+                    self.add_user_reshares(self.username)
+                    self.add_user_mentions(self.username)
+                self.output("Done. Information stored in database.")
         except:
             traceback.print_exc()

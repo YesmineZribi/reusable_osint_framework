@@ -355,10 +355,9 @@ class Module(SocialModule):
         for status in posts_info_list:
             if status['entities']['user_mentions']:
                 for mention in status['entities']['user_mentions']:
-                    post = SocialPost(status['id'],status['text'],status['created_at'])
+                    post = SocialPost(post_id=status['id'],text=status['text'],created_at=status['created_at'])
                     mentioned = SocialUser(id=mention['id'],screen_name=mention['screen_name'])
                     mentions.append(Mention(mentioned=mentioned,post=post))
-
         return mentions
 
     def parse_user_reshares(self,username,json_path):
@@ -369,7 +368,8 @@ class Module(SocialModule):
             posts_info_list = json.load(file)
         retweeted_posts = []
         for status in posts_info_list:
-            if status['text'].startswith('RT'):
+            # if status['text'].startswith('RT'):
+            if 'retweeted_status' in status:
                 original_author = SocialUser(id=status['retweeted_status']['user']['id'],screen_name=status['retweeted_status']['user']['screen_name'])
                 original_post = SocialPost(status['retweeted_status']['id'],original_author,status['retweeted_status']['text'],status['retweeted_status']['created_at'])
                 retweeted_post = SocialPost(status['id'],text=status['text'],created_at=status['created_at'])
