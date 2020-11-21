@@ -1,6 +1,6 @@
 {
     "twitter/twitter_user": {
-        "SOURCE": "@Jasmine52468952",
+        "SOURCE": "@Jasmine52468952, @AsmaZribi1",
         "SLEEP_TIME": 10,
         "SKIP_STATUS": true,
         "SOURCE_TYPE": "screen_name",
@@ -13,6 +13,6 @@
     },
     "analysis/social_analysis": {
         "SOURCE_TYPE": "screen_name",
-        "USERNAMES": "@Jasmine52468952"
+        "USERNAMES": "@Jasmine52468952, @AsmaZribi1"
     }
 }

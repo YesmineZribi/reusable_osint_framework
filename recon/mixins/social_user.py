@@ -133,7 +133,7 @@ class SocialUser(framework.Framework):
             reshared_id = post_tup[5]
             reshared_post_resp = self.query(f"SELECT id,author_id,text,created_at from posts WHERE id = {reshared_id}")
             reshared_post_tup = reshared_post_resp[0] #Only one elemnt returned so extract it from response list
-            reshared_post = SocialPost(post_id=reshared_post_tup[0],author=self.id,text=reshared_post_tup[2],created_at=reshared_post_tup[3])
+            reshared_post = SocialPost(post_id=reshared_post_tup[0],author=self,text=reshared_post_tup[2],created_at=reshared_post_tup[3])
             self.reshares.append(Reshare(resharer=self.id,reshared_post=reshared_post,original_post=original_post))
 
         #Create a reshare object

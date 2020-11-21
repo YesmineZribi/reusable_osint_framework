@@ -1,10 +1,13 @@
 from recon.core import framework
 from recon.mixins.social_user import SocialUser
-from recon.mixins.social_post import SocialPost
+from recon.mixins.social_post import *
+from collections import defaultdict
 
 import networkx as nx
 import matplotlib.pyplot as plt
 
+import json
+import os
 
 class SocialGraph(framework.Framework):
 
@@ -20,6 +23,7 @@ class SocialGraph(framework.Framework):
         #For each user create its object, call its get_all (multithread eventually)?
         self.users = [] #SocialUser[]
         self.users_dict = {}
+        # TODO: Move this to fecth_bulk_account_info
         for username in usernames:
             user = SocialUser(**{source_type: username})
             user.get_all()
@@ -73,11 +77,29 @@ class SocialGraph(framework.Framework):
                 self.G_mentions.add_edge(user,mention.mentioned,post=mention.post)
 
 # TODO: Use Miguel's library for visualization
-    def visualize_graph(self,graph):
-        pos = nx.spring_layout(graph)
-        nx.draw_networkx(graph, pos)
-        nx.draw_networkx_edge_labels(graph, pos)
-        plt.show()
+    def export_graph(self,graph_name,path,file_name):
+        """
+        Save the graph to a json file
+        """
+        # pos = nx.spring_layout(graph)
+        # nx.draw_networkx(graph, pos)
+        # nx.draw_networkx_edge_labels(graph, pos)
+        # plt.show()
+        graph = self.get_graph(graph_name)
+        # Populate nodes with metrics: centrality, closeness, between, eigen
+        # will be used for display
+        self.centrality(graph)
+        self.closeness(graph)
+        self.betweenness_centrality(graph)
+        self.eigenvector_centrality(graph)
+
+        # save to json path
+        data = nx.readwrite.node_link_data(graph)
+        graph_json = os.path.join(path,f'{file_name}.json')
+        with open(graph_json,'w') as file:
+            json.dump(data,file, indent=4)
+
+
 
 
 # TODO: account for cases where a username is not part of the dict
@@ -119,7 +141,7 @@ class SocialGraph(framework.Framework):
         for key, edge_attr in favored_edges.items():
             favored_posts.append(edge_attr['favorite'])
 
-        return (favored,favored_posts)
+        return favored_posts
 
     def mentioned(self,username1,username2):
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
@@ -143,14 +165,52 @@ class SocialGraph(framework.Framework):
         return self.common_in_neighbours(self.G_connections,username1,username2)
 
 
-    def common_favorties(self,username1,username2):
+    def common_favorties_nodes(self,username1,username2):
         return self.common_out_neighbours(self.G_favorites,username1,username2)
 
-    def common_mentions(self,username1,username2):
+
+    def common_mentions_nodes(self,username1,username2):
         return self.common_out_neighbours(self.G_mentions,username1,username2)
 
-    def common_reshares(self,username1,username2):
-        return self.common_out_neighbours(self.G_reshares,username1,username2)
+
+    def common_reshare_nodes(self,username1,username2):
+        authors = self.common_out_neighbours(self.G_reshares,username1,username2)
+        return authors
+
+    def get_all_reshares_from_src(self,username,src):
+        user = self.users_dict[username] if not isinstance(username,SocialUser) else username
+        src = self.users_dict[src] if not isinstance(src,SocialUser) else src
+        # Get all edges from user to src in reshares graph
+        edges = self.get_edges_attr("reshares",user,src)
+        reshares = []
+        for edge,attrs in edges.items():
+            reshares.append(Reshare(user,attrs['reshared_post'],attrs['original_post']))
+        return reshares
+
+
+    def get_all_mentions_of_src(self,username,src):
+        """
+        Get all posts in which username mentions src
+        """
+        user = self.users_dict[username] if not isinstance(username, SocialUser) else username
+        src = self.users_dict[src] if not isinstance(src,SocialUser) else src
+        # Get all edges from user to src
+        edges = self.get_edges_attr("mentions",user,src)
+        mentions = []
+        for edge,attrs in edges.items():
+            mentions.append(Mention(user,src,post=attrs['post']))
+        return mentions
+
+    def get_all_favorites_from_src(self,username,src):
+        user = self.users_dict[username] if not isinstance(username, SocialUser) else username
+        src = self.users_dict[src] if not isinstance(src,SocialUser) else src
+        # Get all edges from user to src
+        edges = self.get_edges_attr("favorites",user,src)
+        favorites = []
+        for edge,attrs in edges.items():
+            favorites.append(Favorite(user,src,post=attrs['favorite']))
+        return favorites
+
 
     def common_out_neighbours(self,graph,username1,username2):
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
@@ -163,6 +223,20 @@ class SocialGraph(framework.Framework):
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
         common_in_neighbours = set(graph.predecessors(user1)).intersection(graph.predecessors(user2))
         return list(common_in_neighbours)
+
+    def shortest_paths(self,graph_name,username1,username2):
+        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
+        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+        graph = self.get_graph(graph_name)
+        shortest_paths = nx.all_shortest_paths(graph,user1,user2)
+        str_repr = ""
+        for path in shortest_paths:
+            str_repr += "{"
+            for i in range(0,len(path)):
+                str_repr += f"{path[i]} -> " if i < len(path)-1 else f"{path[i]}"
+            str_repr += "}\n"
+        return str_repr
+
 
     def get_graph(self,graph_name):
         graph = getattr(self,f'G_{graph_name}')
@@ -191,6 +265,19 @@ class SocialGraph(framework.Framework):
     def get_node(self,username):
         return self.users_dict[username]
 
+    def get_edges(self,graph_name, username1,username2):
+        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
+        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+        graph = self.get_graph(graph_name)
+        return graph[user1][user2]
+
+    def get_edges_attr(self,graph_name,username1,username2):
+        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
+        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+        graph = self.get_graph(graph_name)
+        return graph.get_edge_data(user1,user2,default=0)
+
+
     def get_successors(self,graph,username):
         successors = graph.successors(self.users_dict[username])
         return list(successors)
@@ -198,6 +285,23 @@ class SocialGraph(framework.Framework):
     def get_predecessors(self,graph,username):
         predecessors =  graph.predecessors(self.users_dict[username])
         return list(predecessors)
+
+    def get_all_measures(self,graph,username=None,g_clustering=False):
+        metrics = {}
+        metrics['centrality'] = self.centrality(graph,username)
+        metrics['in_centrality'] = self.in_centrality(graph,username)
+        metrics['out_centrality'] = self.out_centrality(graph,username)
+        metrics['out_centrality'] = self.out_centrality(graph,username)
+        metrics['local_clustering'] = self.local_clustering(graph,username)
+        if g_clustering:
+            metrics['global_clustering'] = self.global_clustering(graph)
+        metrics['closeness'] = self.closeness(graph,username)
+        metrics['betweenness_centrality'] = self.betweenness_centrality(graph,username)
+        metrics['eigenvector_centrality'] = self.eigenvector_centrality(graph,username)
+        # Not yet implemented with directed graphs
+        # metrics['current_flow_closenness_centrality'] = self.current_flow_closenness_centrality(graph,username)
+        # metrics['current_flow_betweenness_centrality'] = self.current_flow_betweenness_centrality(graph,username)
+        return metrics
 
     def centrality(self,graph,username=None):
         """
@@ -210,6 +314,11 @@ class SocialGraph(framework.Framework):
         user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
         # If this function was never called, do calculation
         degree_centrality = nx.degree_centrality(graph)
+
+        # If called on whole graph save measure as node attribute
+        # to be used for visualization
+        for ix,deg in degree_centrality.items():
+            graph.nodes[ix]['centrality'] = deg
         return degree_centrality[user] if username else degree_centrality
 
     def in_centrality(self,graph,username=None):
@@ -223,12 +332,6 @@ class SocialGraph(framework.Framework):
         # If this function was never called, do calculation
         degree_centrality = nx.out_degree_centrality(graph)
         return degree_centrality[user] if username else degree_centrality
-
-    # Centrality meausre
-    # Clustering coefficient
-    # Closeness centrality
-    # Betweenness centrality
-    # Eigenvector Centrality
 
     # TODO: Check if nodes = None is the default value for clustering
     def local_clustering(self,graph,username=None):
@@ -249,6 +352,10 @@ class SocialGraph(framework.Framework):
         """
         user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
         graph_closeness = nx.closeness_centrality(graph,user, wf_improved=wf_improve)
+        # If called on whole graph save measure as node attribute
+        # to be used for visualization
+        for ix,clos in graph_closeness.items():
+            graph.nodes[ix]['closeness'] = clos
         return graph_closeness
 
     def betweenness_centrality(self,graph,username=None):
@@ -263,6 +370,11 @@ class SocialGraph(framework.Framework):
         """
         user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
         graph_betweenness = nx.betweenness_centrality(graph)
+        # If called on whole graph save measure as node attribute
+        # to be used for visualization
+        for ix,btwn in graph_betweenness.items():
+            graph.nodes[ix]['btwn_centrality'] = btwn
+
         return graph_betweenness[user] if username else graph_betweenness
 
     def eigenvector_centrality(self,graph,username=None):
@@ -272,17 +384,24 @@ class SocialGraph(framework.Framework):
         """
         user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
         graph_eigen = nx.eigenvector_centrality(graph)
+        # If called on whole graph save measure as node attribute
+        # to be used for visualization
+        for ix, eig in graph_eigen.items():
+            graph.nodes[ix]['eigen_centrality'] = eig
+
         return graph_eigen[user] if username else graph_eigen
 
-    def current_flow_closenness_centrality(self,graph,username=None):
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        graph_cf = nx.current_flow_closeness_centrality(graph)
-        return graph_cf[user] if username else graph_cf
-
-    def current_flow_betweenness_centrality(self,graph,username=None):
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        graph_cf = nx.current_flow_betweenness_centrality(graph)
-        return graph_cf[user] if username else graph_cf
+    # # Warning: "Not implemented for directed graphs yet "
+    # def current_flow_closenness_centrality(self,graph,username=None):
+    #     user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+    #     graph_cf = nx.current_flow_closeness_centrality(graph)
+    #     return graph_cf[user] if username else graph_cf
+    #
+    # # Warning: "Not implemented for directed graphs yet "
+    # def current_flow_betweenness_centrality(self,graph,username=None):
+    #     user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+    #     graph_cf = nx.current_flow_betweenness_centrality(graph)
+    #     return graph_cf[user] if username else graph_cf
 
 
 

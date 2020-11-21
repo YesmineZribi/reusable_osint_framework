@@ -17,6 +17,9 @@ class SocialPost(framework.Framework):
     def get_text(self):
         return self.text
 
+    def __eq__(self,post):
+        return self.post_id == post.post_id
+
     def __repr__(self):
         return f"Post({self.post_id},{self.author},{self.created_at})"
 
@@ -50,6 +53,15 @@ class Mention(framework.Framework):
     def __repr__(self):
         return f"Mention({self.mentioner} => {self.mentioned} in {self.post})"
 
+class Favorite(framework.Framework):
+    def __init__(self,user=None,author=None,post=None):
+        framework.Framework.__init__(self, 'social_post')
+        self.user = user
+        self.author = author
+        self.post = post
+
+    def __repr__(self):
+        return f"{self.user} liked {self.post}"
 
 class Comment(framework.Framework):
     def __init__(self, author=None,post=None):
