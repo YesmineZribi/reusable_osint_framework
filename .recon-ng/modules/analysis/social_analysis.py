@@ -11,20 +11,19 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+import json
 
 class Module(BaseModule):
 
     meta = {
         'name': 'SNA_Analyser',
-        'author': 'Tim Tomes (@lanmaster53)',
+        'author': 'Yesmine Zribi (@YesmineZribi)',
         'version': '1.0',
-        'description': 'Resolves IP addresses to hosts and updates the database with the results.',
-        'dependencies': ['NetworkX','Flask'],
+        'description': 'Performs social network analysis',
+        'dependencies': ['NetworkX'],
         'files': [],
         'required_keys': [],
         'comments': (
-            'This module needs matplotlib running on your Linux machine to visualize graphs',
-            'Need to install D3.js, show setps..',
             'Some social media platform consider a reshared post a mention of the original post author',
             'such as Twitter which appends an RT @mention to each retweet making a retweet also a mention',
         ),
@@ -38,8 +37,9 @@ class Module(BaseModule):
             ('reshare_analysis',True,False,'Set to True to analyse user\'s post sharing relationship'),
             ('mention_analysis',True,False,'Set to True to analyse users\' mentions relationship'),
             ('favorite_analysis',True,False,'Set to True to analyse user\'s post like relationship'),
-
-
+            ('comment_analysis',True,False,'Set to True to analyse user\'s post comment relationship'),
+            ('save_graphs',True,False,'Saves the graphs to json files to be used by visualization module'),
+            ('fetch_account_info',False,False,'Set to True to run recon'),
         ),
     }
 
@@ -59,24 +59,38 @@ class Module(BaseModule):
         self.handles = [handle[1:] if handle.startswith('@') else handle for handle in self.handles] if all(isinstance(x,str) for x in self.handles) else self.handles # Clean up the handles
 
         # fetch data about all the users
-        # self.fetch_bulk_account_info()
+        if self.options['fetch_account_info']:
+            self.debug("Performing recon...")
+            self.fetch_bulk_account_info()
+            self.debug("Recon complete.")
 
         # Get all pair combinations from the list of users given - needed later
         self.all_pairs = list(combinations(self.handles,2))
 
         #Create graphs
+        self.output("Creating graphs...")
         self.graphs = SocialGraph(self.options['source_type'],self.handles)
 
         # Build result directory
+        self.debug("Building required directories...")
         self.root_path = os.path.dirname(os.path.abspath(sys.path[0])) #Get the root directory
         self.analysis_path = os.path.join(self.root_path,self.meta['name']) #directory to store collected data
+        now = datetime.now()
+        dt_string = now.strftime("%d_%m_%y_%H_%M_%S")
+        self.session_path = os.path.join(self.analysis_path,f"session_{dt_string}")
+
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path, mode=0o777)
+        if not os.path.exists(self.session_path):
+            os.makedirs(self.session_path, mode=0o777)
+
 
 
     def module_run(self):
         # Create User report class for each user
+        self.output("Initiating analysis...")
         if self.options['user_analysis']:
+            self.debug("Started user analysis....")
             self.user_reports = {}
             for handle in self.handles:
                 # Get User metrics
@@ -84,7 +98,7 @@ class Module(BaseModule):
                 user_obj = self.graphs.get_node(handle)
                 user_report = UserReport(user_obj,metrics)
                 self.user_reports[handle] = user_report # Store measures for that user
-
+            self.debug("User analysis complete.")
         #Iterate over each pair of users and analyse relationship
         for pair in self.all_pairs:
             username1 = pair[0]
@@ -94,25 +108,47 @@ class Module(BaseModule):
             #create relationship report object
             rel_obj = RelationshipReport(user_obj1,user_obj2)
             if self.options['connection_analysis']:
+                self.debug("Started connection analysis...")
                 rel_obj.enable_connection_analysis()
                 # Connections analysis
                 self.connection_analysis(username1,username2,rel_obj)
-
+                self.debug("Connection analysis complete.")
             if self.options['reshare_analysis']:
+                self.debug("Started reshare analysis...")
                 rel_obj.enable_reshare_analysis()
                 self.reshare_analysis(username1,username2,rel_obj)
-
+                self.debug("Reshare analysis complete.")
             if self.options['mention_analysis']:
+                self.debug("Started mention analysis...")
                 rel_obj.enable_mention_analysis()
                 self.mention_analysis(username1,username2,rel_obj)
+                self.debug("mention analysis complete")
 
             if self.options['favorite_analysis']:
+                self.debug("Started favorite analysis...")
                 rel_obj.enable_favorite_analysis()
                 self.favorite_analysis(username1,username2,rel_obj)
+                self.debug("favorite analysis complete.")
+            if self.options['comment_analysis']:
+                self.debug("Started comment analysis...")
+                rel_obj.enable_comment_analysis()
+                self.comment_analysis(username1,username2,rel_obj)
+                self.debug("Comment analysis complete.")
 
-            # print(rel_obj)
+            self.output("Generating report...")
             self.generate_report(rel_obj)
+            self.debug("Finished generating reports.")
 
+
+        if self.options['save_graphs']:
+            self.output("Exporting graphs...")
+            self.save_graphs()
+            self.debug("Finished exporting graphs ")
+
+        self.output("Analysis COMPLETE.")
+        self.output(f"results stored in {self.session_path}")
+        # print summary
+        rel_obj.print_summary()
 
 
     def fetch_bulk_account_info(self):
@@ -255,26 +291,65 @@ class Module(BaseModule):
                 favorites = self.graphs.get_all_favorites_from_src(user,src)
                 rel_obj.set_common_src_favorites(user,src,favorites)
 
+
+    def comment_analysis(self,username1,username2,rel_obj):
+        self.direct_comment(username1,username2,rel_obj)
+        self.common_source_comment(username1,username2,rel_obj)
+
+    def direct_comment(self,username1,username2,rel_obj):
+        u1_comment_u2 = self.graphs.commented(username1,username2)
+        u2_comment_u1 = self.graphs.commented(username2,username1)
+        if u1_comment_u2:
+            comments = u1_comment_u2
+            rel_obj.set_comment(username1,username2,comments)
+        if u2_comment_u1:
+            comments = u2_comment_u1
+            rel_obj.set_comment(username2,username1,comments)
+
+    def common_source_comment(self,username1,username2,rel_obj):
+        self.debug("Started commmon source comment analysis..")
+        common_src = self.graphs.common_comment_nodes(username1,username2)
+        # Get the nodes for each user
+        users = [self.graphs.get_node(username1),self.graphs.get_node(username2)]
+        for user in users:
+            for src in common_src:
+                # For each user, get the comments user made on post by src
+                comments = self.graphs.get_all_comments_from_src(user,src)
+                rel_obj.set_common_src_comments(user,src,comments)
+
+        self.debug("Common source comment analysis complete.")
+
     def generate_report(self,rel_obj):
-        reports_path = os.path.join(self.analysis_path,f"{self.options['recon_module']}_reports")
+        reports_path = os.path.join(self.session_path,f"{self.options['recon_module']}_reports")
         if not os.path.exists(reports_path):
             os.makedirs(reports_path,mode=0o777)
-        now = datetime.now()
-        dt_string = now.strftime("%d_%m_%y_%H_%M_%S")
-        report_file = os.path.join(reports_path,f'{rel_obj.user1}_{rel_obj.user2}_relationship_rep_{dt_string}.txt')
+
+        report_file = os.path.join(reports_path,f'{rel_obj.user1.screen_name}_{rel_obj.user2.screen_name}_relationship_rep.txt')
         with open(report_file,'w') as file:
             file.write(rel_obj.summary_report_format())
             file.write(str(rel_obj))
 
+        #TODO: save path of report in DB
+
 
     def save_graphs(self):
-        json_dir = os.path.join(self.analysis_path,f"{self.options['recon_module']}_jsons")
-        if not os.path.exists(json_dir):
-            os.makedirs(json_dir,mode=0o777)
-        # For each graph get the date
-        # Create json and call export graph
 
-    def module_thread(self, host, url, headers):
-        #Create user call from the username
-        #Create graphs
-        pass
+        graphs_dir = os.path.join(self.session_path,f"{self.options['recon_module']}_graphs")
+        if not os.path.exists(graphs_dir):
+            os.makedirs(graphs_dir,mode=0o777)
+        # For each graph get the date
+        for graph_name in ['connections','mentions','reshares','favorites','comments']:
+            #Get the graph's json
+            graph_data = self.graphs.export_graph(graph_name)
+            if not graph_data:
+                continue
+            #Get the date to append to file name
+            now = datetime.now()
+            dt_string = now.strftime("%d_%m_%y_%H_%M_%S")
+            graph_json = os.path.join(graphs_dir,f'{graph_name}_{dt_string}.json')
+            #Write to json
+            with open(graph_json, 'w') as file:
+                json.dump({'links':graph_data[1],'nodes':graph_data[0]}, file, indent=4)
+            self.debug(f"{graph_name} graph saved in {graph_json}")
+
+            #TODO: save path of graphs in db

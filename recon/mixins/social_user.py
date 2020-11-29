@@ -34,7 +34,7 @@ class SocialUser(framework.Framework):
         self.get_timeline()
         self.get_reshares()
         self.get_mentions()
-        #self.get_comments()
+        self.get_comments()
 
     def get_id(self):
         if self.id:
@@ -53,6 +53,7 @@ class SocialUser(framework.Framework):
         return self.screen_name
 
     def get_friends(self):
+        """Friends = users this user is following"""
         if self.friends:
             return self.friends
         #Otherwise fetch from db
@@ -136,7 +137,6 @@ class SocialUser(framework.Framework):
             reshared_post = SocialPost(post_id=reshared_post_tup[0],author=self,text=reshared_post_tup[2],created_at=reshared_post_tup[3])
             self.reshares.append(Reshare(resharer=self.id,reshared_post=reshared_post,original_post=original_post))
 
-        #Create a reshare object
         return self.reshares
 
 
@@ -165,7 +165,32 @@ class SocialUser(framework.Framework):
         return self.mentions
 
     def get_comments(self):
-        pass
+        if self.comments:
+            return self.comments
+
+        if not self.id:
+            self.get_id()
+
+        response_list = self.query(f"""
+        SELECT posts.id, posts.author_id, posts.text, posts.created_at,
+        comments.text, comments.created_at, users.id,
+        users.screen_name
+        from ((comments
+        INNER JOIN posts ON comments.post_id = posts.id)
+        INNER JOIN users ON posts.author_id = users.id)
+        WHERE comments.user_id = {self.id}
+        """)
+
+        for post_tup in response_list:
+            # Get info of post author for each post
+            post_author = SocialUser(screen_name=post_tup[7], id=post_tup[6])
+            # Create post object from response
+            post = SocialPost(post_id=post_tup[0],author=post_author,text=post_tup[2],created_at=post_tup[3])
+            print(f"Post: {post}")
+            # Create comment object from response
+            self.comments.append(Comment(user=self,post=post,text=post_tup[4],created_at=post_tup[5]))
+        return self.comments
+
 
     def __eq__(self,user):
         self.id = self.get_id() if not self.id else self.id

@@ -2,4 +2,5 @@ workspaces load twitter
 modules load social_analysis
 options set source_type screen_name
 options set usernames @Jasmine52468952, @AsmaZribi1
+options set fetch_account_info False
 run 

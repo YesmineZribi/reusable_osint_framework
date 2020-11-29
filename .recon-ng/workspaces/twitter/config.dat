@@ -13,6 +13,10 @@
     },
     "analysis/social_analysis": {
         "SOURCE_TYPE": "screen_name",
-        "USERNAMES": "@Jasmine52468952, @AsmaZribi1"
+        "USERNAMES": "@Jasmine52468952, @AsmaZribi1",
+        "FETCH_ACCOUNT_INFO": false
+    },
+    "visualization/graph_visualizer": {
+        "PATH": "/home/osint/osint_framework/SNA_Analyser/twitter_user_jsons"
     }
 }

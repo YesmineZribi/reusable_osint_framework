@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+<body>
+    {% for graph_name in graphs %}
+    {% if 'connections' in graph_name %}
+    <a href="{{ url_for('go_conn') }}">{{graph_name}} graph</a><br>
+    {% elif 'reshares' in graph_name %}
+    <a href="{{ url_for('go_res') }}">{{graph_name}} graph</a><br>
+    {% endif %}
+    {% endfor %}
+</body>

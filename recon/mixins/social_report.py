@@ -34,12 +34,21 @@ class RelationshipReport(framework.Framework):
         self.reshare_analysis = False
         self.mention_analysis = False
         self.favortie_analysis = False
+        self.comment_analysis = False
+
+        # Flags for common functions
+        self.common_reshare = False
+        self.common_mention = False
+        self.common_favorite = False
+        self.common_comment = False
         # Stores reshares in which u1 reshared post by u2 or vice versa
         self.reshares = {}
         # Stores mentions in which u1 mentions u2 or vice versa
         self.mentions = {}
         # Stores posts from u1 and liked by u2 and vice versa
         self.favorites = {}
+        # Stores comments from u1 of posts made by u2 and vice versa
+        self.comments = {}
         # These will store all reshares by the target users from the same source
         # These include same posts reshared by u1 and u2 and different posts
         # but from the same source
@@ -48,10 +57,13 @@ class RelationshipReport(framework.Framework):
         # These will store all mentions by the target users from the same source
         self.user1_mentions = {} #{src: Mention[]}
         self.user2_mentions = {} #{src: Mention[]}
+
         #These will store all favorites by the target users from the same source
         self.user1_favorites = {} #{src: Favorite[]}
         self.user2_favorites = {} #{src: Favorite[]}
-
+        #These will store all comments by the target users from the same source
+        self.user1_comments = {} #{src:Comment[]}
+        self.user2_comments = {} #{src:Comment[]}
 
 
     def enable_connection_analysis(self):
@@ -65,6 +77,9 @@ class RelationshipReport(framework.Framework):
 
     def enable_favorite_analysis(self):
         self.favortie_analysis = True
+
+    def enable_comment_analysis(self):
+        self.comment_analysis = True
 
 
     def set_connection(self,nature,source=None,target=None):
@@ -91,7 +106,12 @@ class RelationshipReport(framework.Framework):
         key = (user1,user2)
         self.favorites[key] = posts
 
+    def set_comment(self,user1,user2,comments):
+        key = (user1,user2)
+        self.comments[key] = comments
+
     def set_common_src_reshares(self,user, src,reshares):
+        self.common_reshare = True
         reshare_dict = self.user1_reshares if user == self.user1 else self.user2_reshares
         if src not in reshare_dict: # Add key if not already there
             reshare_dict[src] = CommonSrcReshares(self.user1,src)
@@ -99,12 +119,19 @@ class RelationshipReport(framework.Framework):
         reshare_dict[src].set_reshares(reshares)
 
     def set_common_src_mentions(self,user,src,mentions):
+        self.common_mention = True
         mention_dict = self.user1_mentions if user == self.user1 else self.user2_mentions
         mention_dict[src] = mentions
 
     def set_common_src_favorites(self,user,src,favorites):
+        self.common_favorite = True
         favorite_dict = self.user1_favorites if user == self.user1 else self.user2_favorites
         favorite_dict[src] = favorites
+
+    def set_common_src_comments(self,user,src,comments):
+        self.common_comment = True
+        comment_dict = self.user1_comments if user == self.user1 else self.user2_comments
+        comment_dict[src] = comments
 
 
     def connection_analysis_format(self):
@@ -199,73 +226,134 @@ class RelationshipReport(framework.Framework):
                     string_rep += "-----------------------------\n"
         return string_rep
 
+    def comment_analysis_format(self):
+        string_rep = ""
+        if self.comment_analysis:
+            string_rep += "************* Comment Analysis *************\n"
+            string_rep += f"Direct Comments: \n"
+            string_rep += "" if self.comments else "NONE"
+            for key,comments in self.comments.items():
+                user1 = key[0]
+                user2 = key[1]
+                string_rep += f"{user1} commented on post(s) from {user2}: \n"
+                for comment in comments:
+                    original_post = comment.post
+                    string_rep += "Original Post:\n"
+                    string_rep+= f"\tid: {original_post.post_id}\n"
+                    string_rep += f"\tdate created: {original_post.created_at}\n"
+                    string_rep += "\ttext: \n"
+                    string_rep += f"\t\t{original_post.get_text()}\n"
+                    string_rep += ""
+                    string_rep += "Comment: \n"
+                    string_rep += f"\tdate created: {comment.created_at}\n"
+                    string_rep += "\ttext: \n"
+                    string_rep += f"\t\t{comment.get_text()}\n"
+                    string_rep += ""
+                    string_rep += "-----------------------------\n"
+        return string_rep
+
     def common_reshare_analysis_format(self):
         string_rep = ""
-        string_rep += f"Posts shared by {self.user1} and {self.user2} from the same source: \n"
-        #For each src, print the src and the tweets of each user
-        for src in self.user1_reshares:
-            string_rep += f"Both users shared posts from {src}\n"
-            for user in [self.user1,self.user2]:
-                user_dict = self.user1_reshares if user == self.user1 else self.user2_reshares
-                string_rep += f"Posts shared by {user}:\n"
-                for reshare in user_dict[src].reshares:
+        if self.common_reshare:
+            string_rep += f"Posts shared by {self.user1} and {self.user2} from the same source: \n"
+            #For each src, print the src and the tweets of each user
+            for src in self.user1_reshares:
+                string_rep += f"Both users shared posts from {src}\n"
+                for user in [self.user1,self.user2]:
+                    user_dict = self.user1_reshares if user == self.user1 else self.user2_reshares
+                    string_rep += f"Posts shared by {user}:\n"
+                    for reshare in user_dict[src].reshares:
 
-                    original_post = reshare.original_post
-                    reshared_post = reshare.reshared_post
-                    string_rep += "\tOriginal Post:\n"
-                    string_rep += f"\t\tid: {original_post.post_id}\n"
-                    string_rep += f"\t\tdate created: {original_post.created_at}\n"
-                    string_rep += "\t\ttext: \n"
-                    string_rep += f"\t\t\t{original_post.get_text()}\n"
-                    string_rep += ""
-                    string_rep += "\tShared Post: \n"
-                    string_rep += f"\t\tid: {reshared_post.post_id}\n"
-                    string_rep += f"\t\tdate created: {reshared_post.created_at}\n"
-                    string_rep += "\t\ttext: \n"
-                    string_rep += f"\t\t\t{reshared_post.get_text()}\n"
-                    string_rep += ""
-            string_rep += "-----------------------------\n"
+                        original_post = reshare.original_post
+                        reshared_post = reshare.reshared_post
+                        string_rep += "\tOriginal Post:\n"
+                        string_rep += f"\t\tid: {original_post.post_id}\n"
+                        string_rep += f"\t\tdate created: {original_post.created_at}\n"
+                        string_rep += "\t\ttext: \n"
+                        string_rep += f"\t\t\t{original_post.get_text()}\n"
+                        string_rep += ""
+                        string_rep += "\tShared Post: \n"
+                        string_rep += f"\t\tid: {reshared_post.post_id}\n"
+                        string_rep += f"\t\tdate created: {reshared_post.created_at}\n"
+                        string_rep += "\t\ttext: \n"
+                        string_rep += f"\t\t\t{reshared_post.get_text()}\n"
+                        string_rep += ""
+                string_rep += "-----------------------------\n"
         return string_rep
 
     def common_mention_analysis_format(self):
         string_rep = ""
-        string_rep += f"Posts in which {self.user1} and {self.user2} mention the same user: \n"
-        #For each src, print the src and the tweets of each user
-        for src in self.user1_mentions:
-            string_rep += f"Both users mentioned {src}\n"
-            for user in [self.user1,self.user2]:
-                user_dict = self.user1_mentions if user == self.user1 else self.user2_mentions
-                string_rep += f"Posts made by {user} in which {src} is mentioned:\n"
-                for mention in user_dict[src]:
-                    post = mention.post
-                    string_rep += "\tPost:\n"
-                    string_rep += f"\t\tid: {post.post_id}\n"
-                    string_rep += f"\t\tdate created: {post.created_at}\n"
-                    string_rep += "\t\ttext: \n"
-                    string_rep += f"\t\t\t{post.get_text()}\n"
-                    string_rep += "\n"
-            string_rep += "-----------------------------\n"
+        if self.common_mention:
+            string_rep += f"Posts in which {self.user1} and {self.user2} mention the same user: \n"
+            #For each src, print the src and the tweets of each user
+            for src in self.user1_mentions:
+                string_rep += f"Both users mentioned {src}\n"
+                for user in [self.user1,self.user2]:
+                    user_dict = self.user1_mentions if user == self.user1 else self.user2_mentions
+                    string_rep += f"Posts made by {user} in which {src} is mentioned:\n"
+                    for mention in user_dict[src]:
+                        post = mention.post
+                        string_rep += "\tPost:\n"
+                        string_rep += f"\t\tid: {post.post_id}\n"
+                        string_rep += f"\t\tdate created: {post.created_at}\n"
+                        string_rep += "\t\ttext: \n"
+                        string_rep += f"\t\t\t{post.get_text()}\n"
+                        string_rep += "\n"
+                string_rep += "-----------------------------\n"
+
         return string_rep
 
     def common_favorite_analysis_format(self):
         string_rep = ""
-        string_rep += f"Posts that {self.user1} and {self.user2} liked that were authored from the same source: \n"
-        #For each src, print the src and the tweets of each user
-        for src in self.user1_favorites:
-            string_rep += f"Both users liked posts from {src}\n"
-            for user in [self.user1,self.user2]:
-                user_dict = self.user1_favorites if user == self.user1 else self.user2_favorites
-                string_rep += f"Posts made by {src} that {user} liked:\n"
-                for favorite in user_dict[src]:
-                    post = favorite.post
-                    string_rep += "\tPost:\n"
-                    string_rep += f"\t\tid: {post.post_id}\n"
-                    string_rep += f"\t\tdate created: {post.created_at}\n"
-                    string_rep += "\t\ttext: \n"
-                    string_rep += f"\t\t\t{post.get_text()}\n"
-                    string_rep += "\n"
-            string_rep += "-----------------------------\n"
+        if self.common_favorite:
+            string_rep += f"Posts that {self.user1} and {self.user2} liked that were authored from the same source: \n"
+            #For each src, print the src and the tweets of each user
+            for src in self.user1_favorites:
+                string_rep += f"Both users liked posts from {src}\n"
+                for user in [self.user1,self.user2]:
+                    user_dict = self.user1_favorites if user == self.user1 else self.user2_favorites
+                    string_rep += f"Posts made by {src} that {user} liked:\n"
+                    for favorite in user_dict[src]:
+                        post = favorite.post
+                        string_rep += "\tPost:\n"
+                        string_rep += f"\t\tid: {post.post_id}\n"
+                        string_rep += f"\t\tdate created: {post.created_at}\n"
+                        string_rep += "\t\ttext: \n"
+                        string_rep += f"\t\t\t{post.get_text()}\n"
+                        string_rep += "\n"
+                string_rep += "-----------------------------\n"
+
         return string_rep
+
+    def common_comment_analysis_format(self):
+        string_rep = ""
+        if self.common_comment:
+            string_rep += f"Users whose posts both {self.user1} and {self.user2} commented on: \n"
+            #For each src, print the src and the tweets of each user
+            for src in self.user1_comments:
+                string_rep += f"Both users commented on posts from {src}\n"
+                for user in [self.user1,self.user2]:
+                    user_dict = self.user1_comments if user == self.user1 else self.user2_comments
+                    string_rep += f"Comments made by {user}:\n"
+                    for comment in user_dict[src]:
+                        original_post = comment.post
+                        string_rep += "\tOriginal Post:\n"
+                        string_rep += f"\t\tid: {original_post.post_id}\n"
+                        string_rep += f"\t\tdate created: {original_post.created_at}\n"
+                        string_rep += "\t\ttext: \n"
+                        string_rep += f"\t\t\t{original_post.get_text()}\n"
+                        string_rep += ""
+                        string_rep += "\tComment: \n"
+                        string_rep += f"\t\tdate created: {comment.created_at}\n"
+                        string_rep += "\t\ttext: \n"
+                        string_rep += f"\t\t\t{comment.get_text()}\n"
+                        string_rep += ""
+                string_rep += "-----------------------------\n"
+
+        return string_rep
+
+    def print_summary(self):
+        print(self.summary_report_format())
 
     def summary_report_format(self):
         string_rep = "Report Summary\n"
@@ -303,6 +391,17 @@ class RelationshipReport(framework.Framework):
                     string_rep += f"#\t{user1} liked at least one post by {user2}\n"
             if self.user1_favorites:
                 string_rep +="#\tBoth users liked at least one post from common source(s)\n"
+
+        if self.comment_analysis:
+            string_rep += "# A comment relationship was found\n"
+            if self.comments:
+                for key in self.comments:
+                    user1 = key[0]
+                    user2 = key[1]
+                    string_rep += f"#\t{user1} commented on at least one post by {user2}\n"
+            if self.user1_comments:
+                string_rep += "#\tBoth users commented on  at least one post from common source(s)\n"
+
         string_rep += "###############################################################\n"
         return string_rep
 
@@ -327,7 +426,9 @@ class RelationshipReport(framework.Framework):
         ###### Favorites #######
         string_rep += self.favorite_analysis_format()
         string_rep += self.common_favorite_analysis_format()
-
+        ###### Comments #######
+        string_rep += self.comment_analysis_format()
+        string_rep += self.common_comment_analysis_format()
 
         return string_rep
 

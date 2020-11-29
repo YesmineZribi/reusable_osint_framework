@@ -64,11 +64,19 @@ class Favorite(framework.Framework):
         return f"{self.user} liked {self.post}"
 
 class Comment(framework.Framework):
-    def __init__(self, author=None,post=None):
+    def __init__(self, user=None,post=None, text=None, created_at=None):
         """
         author: SocialUser
         post: Post
         """
         framework.Framework.__init__(self, 'social_post')
-        self.author = author
+        self.user = user
         self.post = post
+        self.text = text
+        self.created_at = created_at
+
+    def get_text(self):
+        return self.text
+
+    def __repr__(self):
+        return f"Comment({self.user},{self.post},{self.created_at})"

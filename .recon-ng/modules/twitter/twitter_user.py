@@ -344,6 +344,7 @@ class Module(SocialModule):
         #status['in_reply_to_status_id']
         #status['in_reply_to_user_id']
         #status['in_reply_to_screen_name']
+        #return [Comment(SocialUser("Jasmine52468952",1085970618313510919),SocialPost(000,SocialUser("AsmaZribi1",1097133672099209217),"post#1","today"),"cool","12pm")]
         pass
 
     def parse_user_mentions(self,username,json_path):

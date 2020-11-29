@@ -16,68 +16,98 @@ class SocialGraph(framework.Framework):
         self.source_type = source_type
         #Initialize empty graphs
         self.G_connections = nx.DiGraph()
+        # Can have multiple edges between two nodes => if user shares multiple posts, mentions another user multiple times etc.
         self.G_reshares = nx.MultiDiGraph()
         self.G_favorites = nx.MultiDiGraph()
         self.G_mentions = nx.MultiDiGraph()
+        self.G_comments = nx.MultiDiGraph()
 
         #For each user create its object, call its get_all (multithread eventually)?
         self.users = [] #SocialUser[]
-        self.users_dict = {}
-        # TODO: Move this to fecth_bulk_account_info
+        # Useful mapping for efficient fetching
+        self.users_dict = {} #{screen_name: SocialUser}
+        # Stores the group number of each user, used for visualization for coloring nodes
+        self.users_group = {} #{SocialUser: group#}
         for username in usernames:
             user = SocialUser(**{source_type: username})
             user.get_all()
             self.users.append(user)
             self.users_dict[username] = user
+            self.users_group[user] = 0 # Target users are group 0
 
         #Create the graphs
+
         self.create_connections_graph()
         self.create_reshares_graph()
         self.create_favorites_graph()
         self.create_mentions_graph()
+        self.create_comments_graph()
 
         #Extract all found users
         self.map_users()
 
         self.degree_centrality = {} # Used to store centrality degree of all nodes
-        self.nodes = []
+
 
     def create_connections_graph(self):
-        self.output("Generating connections graph for users...")
+        self.debug("Generating connections graph for users...")
         for user in self.users:
             # Add followers
             for follower in user.get_followers():
                 self.G_connections.add_edge(follower,user)
+                if follower not in (self.users_group or self.users):
+                    self.users_group[follower] = 1
             # Add friends
             for friend in user.get_friends():
                 self.G_connections.add_edge(user,friend)
+                # Friends of target users are group 2
+                # Friends that are also followers are group 4 (target users remain in group 0)
+                if friend not in self.users_group:
+                    self.users_group[friend] = 2
+                elif friend not in self.users: # Users followed by target users but not followed back
+                    self.users_group[friend] = 3
+
         # self.visualize_graph(self.G_connections)
 
 
     def create_reshares_graph(self):
-        self.output("Generating reshares graph for users...")
+        self.debug("Generating reshares graph for users...")
         for user in self.users:
             for reshare in user.get_reshares():
                 self.G_reshares.add_edge(user,reshare.original_post.author,
                                          original_post=reshare.original_post,
                                          reshared_post=reshare.reshared_post)
+                # People whose posts target users shared are group 1 in reshare group
+                # Unless they were already grouped in connection (in which case don't change)
+                self.users_group[reshare.original_post.author] = 1 if reshare.original_post.author not in self.users_group else self.users_group[reshare.original_post.author]
 
 
     def create_favorites_graph(self):
-        self.output("Generating favorites graph for users...")
+        self.debug("Generating favorites graph for users...")
         for user in self.users:
             for favorite in user.get_favorites():
                 self.G_favorites.add_edge(user,favorite.author,favorite=favorite)
+                # favorite authors are group 1
+                self.users_group[favorite.author] = 1 if favorite.author not in self.users_group else self.users_group[favorite.author]
 
 
     def create_mentions_graph(self):
-        self.output("Generating mentions graph for users...")
+        self.debug("Generating mentions graph for users...")
         for user in self.users:
             for mention in user.get_mentions():
                 self.G_mentions.add_edge(user,mention.mentioned,post=mention.post)
+                # People mentioned are group 1
+                self.users_group[mention.mentioned] = 1 if mention.mentioned not in self.users_group else self.users_group[mention.mentioned]
 
-# TODO: Use Miguel's library for visualization
-    def export_graph(self,graph_name,path,file_name):
+    def create_comments_graph(self):
+        self.debug("Generating comments graph for users...")
+        for user in self.users:
+            for comment in user.get_comments():
+                post_author = comment.post.author
+                self.G_comments.add_edge(user,post_author,comment=comment)
+                # People mentioned are group 1
+                self.users_group[post_author] = 1 if post_author not in self.users_group else self.users_group[post_author]
+    def export_graph(self,graph_name):
         """
         Save the graph to a json file
         """
@@ -85,36 +115,206 @@ class SocialGraph(framework.Framework):
         # nx.draw_networkx(graph, pos)
         # nx.draw_networkx_edge_labels(graph, pos)
         # plt.show()
-        graph = self.get_graph(graph_name)
+        data = (0,0)
+        if graph_name in 'connections':
+            data = self.serialize_connections_graph()
+
+        elif graph_name in 'reshares':
+            data = self.serialize_reshares_graph()
+
+        elif graph_name in 'mentions':
+            data = self.serialize_mentions_graph()
+
+        elif graph_name in 'favorites':
+            data = self.serialize_favorites_graph()
+        elif graph_name in 'comments':
+            data = self.serialize_comments_graph()
+        else:
+            self.error(f"Graph {graph_name} does not exist")
+
+        return data
+
+    def serialize_connections_graph(self):
+        """
+        Serialize to JSON the connections graph
+        Given nodes and edges store custom object default serialization
+        does not work
+        """
+        if nx.is_empty(self.G_connections):
+            return
         # Populate nodes with metrics: centrality, closeness, between, eigen
         # will be used for display
-        self.centrality(graph)
-        self.closeness(graph)
-        self.betweenness_centrality(graph)
-        self.eigenvector_centrality(graph)
+        self.centrality(self.G_connections)
+        self.closeness(self.G_connections)
+        self.betweenness_centrality(self.G_connections)
+        self.eigenvector_centrality(self.G_connections)
 
-        # save to json path
-        data = nx.readwrite.node_link_data(graph)
-        graph_json = os.path.join(path,f'{file_name}.json')
-        with open(graph_json,'w') as file:
-            json.dump(data,file, indent=4)
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_connections.nodes():
+            # Note: groups are used for coloring in D3
+            node_dict = {'betweenness':self.G_connections.nodes[user]['btwn_centrality'],
+                         'degree': self.G_connections.nodes[user]['centrality'],
+                         'eigenvector': self.G_connections.nodes[user]['eigen_centrality'],
+                         'group': self.users_group[user],
+                         'id': user.id,
+                         'name':user.screen_name,
 
+                         }
+            nodes.append(node_dict)
 
+            #Update with index
+            nodes_index[user] = i
+            i += 1
 
+        links = []
+        for users in self.G_connections.edges():
+            # each edge will be: {source: index of user 0, target: index of user 1}
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'weight':1}
+            links.append(edge_dict)
+        return (nodes,links)
 
-# TODO: account for cases where a username is not part of the dict
-# Will need its own recon
+    def serialize_reshares_graph(self):
+        if nx.is_empty(self.G_reshares):
+            return
+
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_reshares.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
+                         'degree':self.centrality(self.G_reshares,user),
+                         'betweenness':0.0, # Not yet implemented for multigraphs
+                         'eigenvector':0.0 # Not yet implemented for multigraphs
+                         }
+            nodes.append(node_dict)
+
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_reshares.edges(data=True):
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'original_post_id':users[2]['original_post'].post_id,
+                         'original_post_text':users[2]['original_post'].text,
+                         'reshared_post_id':users[2]['reshared_post'].post_id,
+                         'reshared_post_text':users[2]['reshared_post'].text,'weight':1}
+            links.append(edge_dict)
+        return (nodes,links)
+
+    def serialize_mentions_graph(self):
+        if nx.is_empty(self.G_mentions):
+            return
+
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_mentions.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
+                         'degree': self.centrality(self.G_mentions, user),
+                         'betweenness': 0.0, # Not yet implemented for multigraphs
+                         'eigenvector': 0.0 # Not yet implemented for multigraphs
+                         }
+            nodes.append(node_dict)
+
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_mentions.edges(data=True):
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'post_id':users[2]['post'].post_id,
+                         'post_text':users[2]['post'].text,'weight':1}
+            links.append(edge_dict)
+        return (nodes,links)
+
+    def serialize_favorites_graph(self):
+        if nx.is_empty(self.G_favorites):
+            return
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_favorites.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
+                         'degree': self.centrality(self.G_favorites, user),
+                         'betweenness': 0.0, # Not yet implemented for multigraphs
+                         'eigenvector': 0.0 # Not yet implemented for multigraphs
+                         }
+            node_dict['group'] = 0 if user in self.users else node_dict['group']
+            nodes.append(node_dict)
+
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_favorites.edges(data=True):
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'post_id':users[2]['favorite'].post_id,
+                         'post_text':users[2]['favorite'].text,'weight':1}
+            links.append(edge_dict)
+
+        return (nodes,links)
+
+    def serialize_comments_graph(self):
+        if nx.is_empty(self.G_comments):
+            return
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_comments.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
+                         'degree': self.centrality(self.G_comments, user),
+                         'betweenness': 0.0, # Not yet implemented for multigraphs
+                         'eigenvector': 0.0 # Not yet implemented for multigraphs
+                         }
+            nodes.append(node_dict)
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_comments.edges(data=True):
+            edge_dict = {'source': nodes_index[users[0]], 'target': nodes_index[users[1]],
+                             'post_id': users[2]['comment'].post.post_id,
+                             'post_text': users[2]['comment'].post.text,
+                             'comment': users[2]['comment'].text,
+                             'weight': 1}
+            links.append(edge_dict)
+
+        return (nodes,links)
+
     def follows(self,username1,username2):
+        if nx.is_empty(self.G_connections):
+            return False
+
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+
         return nx.has_path(self.G_connections,user1,user2)
 
-# TODO: test this
-# TODO: get the text of the post to include in report in module
+
     def reshared(self,username1,username2):
+        if nx.is_empty(self.G_reshares):
+            return False
+
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+
         reshared = nx.has_path(self.G_reshares,user1,user2)
+
         if not reshared:
             return False
         posts = []
@@ -129,9 +329,15 @@ class SocialGraph(framework.Framework):
 
 
     def favored(self,username1,username2):
+        if nx.is_empty(self.G_favorites):
+            return False
+
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+
         favored = nx.has_path(self.G_favorites,user1,user2)
+
+
         if not favored:
             return False
 
@@ -144,9 +350,14 @@ class SocialGraph(framework.Framework):
         return favored_posts
 
     def mentioned(self,username1,username2):
+        if nx.is_empty(self.G_mentions):
+            return False
+
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+
         mentioned = nx.has_path(self.G_mentions,user1,user2)
+
         if not mentioned:
             return False
 
@@ -157,25 +368,62 @@ class SocialGraph(framework.Framework):
             mentioned_posts.append(edge_attr['post'])
         return mentioned_posts
 
+    def commented(self,username1,username2):
+        if nx.is_empty(self.G_comments):
+            return False
+
+        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
+        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+        commented = nx.has_path(self.G_comments,user1,user2)
+
+        if not commented:
+            return False
+
+        #Collect all posts in which user1 commented on post from user2
+        commented_posts = []
+        commented_edges = self.G_comments[user1][user2]
+        for key,edge_attr in commented_edges.items():
+            commented_posts.append(edge_attr['comment'])
+
+        return commented_posts
+
     def common_friends(self,username1,username2):
+        if nx.is_empty(self.G_connections):
+            return []
         return self.common_out_neighbours(self.G_connections,username1,username2)
 
 
     def common_followers(self,username1,username2):
+        if nx.is_empty(self.G_connections):
+            return []
         return self.common_in_neighbours(self.G_connections,username1,username2)
 
-
     def common_favorties_nodes(self,username1,username2):
+        if nx.is_empty(self.G_favorites):
+            return []
+
         return self.common_out_neighbours(self.G_favorites,username1,username2)
 
 
     def common_mentions_nodes(self,username1,username2):
+        if nx.is_empty(self.G_mentions):
+            return []
         return self.common_out_neighbours(self.G_mentions,username1,username2)
 
 
     def common_reshare_nodes(self,username1,username2):
+        if nx.is_empty(self.G_reshares):
+            return []
         authors = self.common_out_neighbours(self.G_reshares,username1,username2)
         return authors
+
+
+    def common_comment_nodes(self,username1,username2):
+        if nx.is_empty(self.G_comments):
+            return []
+
+        return self.common_out_neighbours(self.G_comments,username1,username2)
+
 
     def get_all_reshares_from_src(self,username,src):
         user = self.users_dict[username] if not isinstance(username,SocialUser) else username
@@ -211,6 +459,16 @@ class SocialGraph(framework.Framework):
             favorites.append(Favorite(user,src,post=attrs['favorite']))
         return favorites
 
+    def get_all_comments_from_src(self,username,src):
+        user = self.users_dict[username] if not isinstance(username, SocialUser) else username
+        src = self.users_dict[src] if not isinstance(src,SocialUser) else src
+        # Get all edges from user to src
+        edges = self.get_edges_attr("comments",user,src)
+        comments = []
+        for edge,attrs in edges.items():
+            comments.append(attrs['comment'])
+
+        return comments
 
     def common_out_neighbours(self,graph,username1,username2):
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
@@ -228,7 +486,11 @@ class SocialGraph(framework.Framework):
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
         graph = self.get_graph(graph_name)
+        if nx.is_empty(graph):
+            return ""
+
         shortest_paths = nx.all_shortest_paths(graph,user1,user2)
+
         str_repr = ""
         for path in shortest_paths:
             str_repr += "{"
@@ -261,6 +523,8 @@ class SocialGraph(framework.Framework):
             key = vars(user)[self.source_type]
             if key not in self.users_dict:
                 self.users_dict[key] = user
+
+
 
     def get_node(self,username):
         return self.users_dict[username]
@@ -319,6 +583,7 @@ class SocialGraph(framework.Framework):
         # to be used for visualization
         for ix,deg in degree_centrality.items():
             graph.nodes[ix]['centrality'] = deg
+
         return degree_centrality[user] if username else degree_centrality
 
     def in_centrality(self,graph,username=None):
@@ -351,11 +616,13 @@ class SocialGraph(framework.Framework):
         cluster
         """
         user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        graph_closeness = nx.closeness_centrality(graph,user, wf_improved=wf_improve)
-        # If called on whole graph save measure as node attribute
-        # to be used for visualization
-        for ix,clos in graph_closeness.items():
-            graph.nodes[ix]['closeness'] = clos
+        if username:
+            graph_closeness = nx.closeness_centrality(graph,user, wf_improved=wf_improve)
+        else:
+            graph_closeness = nx.closeness_centrality(graph, wf_improved=wf_improve)
+            for ix, clos in graph_closeness.items():
+                graph.nodes[ix]['closeness'] = clos
+
         return graph_closeness
 
     def betweenness_centrality(self,graph,username=None):

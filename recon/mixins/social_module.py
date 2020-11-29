@@ -293,97 +293,145 @@ class SocialModule(ABC,BaseModule):
         self.query(f"INSERT OR REPLACE INTO mentions (user_id,mentioned_id,post_id) VALUES ({user_id},{mentioned_id},{post_id})")
 
 
-    def add_comment(self, post_id, user_id, text):
+    def add_comment(self, post_id, user_id, text,date):
         '''
         adds a comment to the comment table whereby user_id commented text
         on the post with post_id
         '''
-        pass
+        self.query(f"INSERT OR REPLACE INTO comments (post_id,user_id,text,created_at) VALUES ({post_id},{user_id},\'{text}\',\"{date}\")")
+
 
     def add_user_info(self, username):
         #Fetch user info
         path = self.fetch_user_info(username, self.user_path[username])
-        #Parse for id and screen_name
-        user = self.parse_user_info(username, path)
-        self.id = user.id
-        self.screen_name = user.screen_name
-        #Add info to db
-        self.add_user(user.id,user.screen_name)
-        return id
+        if path:
+            #Parse for id and screen_name
+            user = self.parse_user_info(username, path)
+            if not isinstance(user,SocialUser):
+                self.error("Invalid data type, parse_user_info return type should be SocialUser")
+
+            self.id = user.id
+            self.screen_name = user.screen_name
+            #Add info to db
+            self.add_user(user.id,user.screen_name)
+            return id
 
     def add_user_friends(self,username):
         #fetch user friends
         path = self.fetch_user_friends(username,self.user_path[self.username])
-        #Parse user friends json
-        friends = self.parse_user_friends(username,path)
-        #Add to the db
-        for friend in friends:
-            self.add_user(friend.id,friend.screen_name)
-            self.add_friend(self.id,friend.id)
+        if path:
+            #Parse user friends json
+            friends = self.parse_user_friends(username,path)
+            # Check user return type from hook method is correct
+            if not isinstance(friends, list) or not (all(isinstance(f, SocialUser) for f in friends)):
+                self.error("Invalid data type, parse_user_followers return type should be SocialUser[]")
+
+            #Add to the db
+            for friend in friends:
+                self.add_user(friend.id,friend.screen_name)
+                self.add_friend(self.id,friend.id)
 
     def add_user_followers(self,username):
         #fetch user followers
         path = self.fetch_user_followers(username,self.user_path[self.username])
-        #Parse user followers json
-        followers = self.parse_user_followers(username,path)
-        #Add to the db
-        for follower in followers:
-            self.add_user(follower.id,follower.screen_name)
-            self.add_follower(self.id,follower.id)
+        if path:
+            #Parse user followers json
+            followers = self.parse_user_followers(username,path)
+            if not isinstance(followers, list) or not (all(isinstance(f, SocialUser) for f in followers)):
+                self.error("Invalid data type, parse_user_followers return type should be SocialUser[]")
+
+            #Add to the db
+            for follower in followers:
+                self.add_user(follower.id,follower.screen_name)
+                self.add_follower(self.id,follower.id)
 
     def add_user_posts(self,username):
         #fetch user timeline path
         path = self.fetch_user_timeline(username,self.user_path[self.username])
-        #Parse user timeline json
-        posts = self.parse_user_timeline(username,path)
-        #Add to the db
-        for post in posts:
-            self.add_post(post.post_id,self.id,post.text,post.created_at)
+        if path:
+            #Parse user timeline json
+            posts = self.parse_user_timeline(username,path)
+            # Check user returned proper data type
+            if not isinstance(posts,list) or not(all(isinstance(p,SocialPost) for p in posts)):
+                self.error("Invalid data type, parse_user_timeline return type should be SocialPost[]")
+
+            #Add to the db
+            for post in posts:
+                self.add_post(post.post_id,self.id,post.text,post.created_at)
 
     def add_user_favorites(self,username):
         #fetch user favorites path
         path = self.fetch_user_favorites(username,self.user_path[self.username])
-        #fetch user favorite/liked posts
-        favorites = self.parse_user_favorites(username,path)
-        for favorite in favorites:
-            #Add author of post to the db
-            self.add_user(favorite.author.id,favorite.author.screen_name)
-            #Add post to the db
-            self.add_post(favorite.post_id,favorite.author.id,favorite.text,favorite.created_at)
-            #Add to favorites
-            self.add_favorite(self.id,favorite.post_id)
+        if path:
+            #parse user favorite/liked posts
+            favorites = self.parse_user_favorites(username,path)
+            if not isinstance(favorites,list) or not(all(isinstance(f,SocialPost) for f in favorites)):
+                self.error("Invalid data type, parse_user_favorites return type should be SocialPost[]")
+
+            for favorite in favorites:
+                #Add author of post to the db
+                self.add_user(favorite.author.id,favorite.author.screen_name)
+                #Add post to the db
+                self.add_post(favorite.post_id,favorite.author.id,favorite.text,favorite.created_at)
+                #Add to favorites
+                self.add_favorite(self.id,favorite.post_id)
 
     def add_user_mentions(self,username):
         #fetch user mentions path
         path = self.fetch_user_mentions(username,self.user_path[self.username])
-        #fetch users this user mentioned
-        mentions = self.parse_user_mentions(username,path)
-        for mentioned in mentions:
-            #Add the mentioned user
-            self.add_user(mentioned.mentioned.id,mentioned.mentioned.screen_name)
-            #Add the post in which the user was mentioned
-            self.add_post(mentioned.post.post_id,self.id,mentioned.post.text,mentioned.post.created_at)
-            #Add the mention
-            self.add_mention(self.id,mentioned.mentioned.id,mentioned.post.post_id)
+        if path:
+            #fetch users this user mentioned
+            mentions = self.parse_user_mentions(username,path)
+            if not isinstance(mentions,list) or not(all(isinstance(m,Mention) for m in mentions)):
+                self.error("Invalid data type, parse_user_mentions return type should be Mention[]")
+
+            for mentioned in mentions:
+                #Add the mentioned user
+                self.add_user(mentioned.mentioned.id,mentioned.mentioned.screen_name)
+                #Add the post in which the user was mentioned
+                self.add_post(mentioned.post.post_id,self.id,mentioned.post.text,mentioned.post.created_at)
+                #Add the mention
+                self.add_mention(self.id,mentioned.mentioned.id,mentioned.post.post_id)
 
     def add_user_reshares(self,username):
         path = self.fetch_user_reshares(username,self.user_path[self.username])
-        reshared_posts = self.parse_user_reshares(username,path)
-        for reshared in reshared_posts:
-            #Add original author to user table
-            #(o_author_id,o_author_screen_name)
-            self.add_user(reshared.original_post.author.id,reshared.original_post.author.screen_name)
-            #Add original tweet to posts table
-            #(o_post_id,o_author_id,o_text,o_created_at)
-            self.add_post(reshared.original_post.post_id,reshared.original_post.author.id,reshared.original_post.text,reshared.original_post.created_at)
-            #Add retweeted post to posts table
-            #(reshared_id,this user,rt_text,rt_created_at)
-            self.add_post(reshared.reshared_post.post_id,self.id,reshared.reshared_post.text,reshared.reshared_post.created_at)
-            #Add the reshare relationship
-            self.add_reshare(reshared.original_post.post_id,self.id,reshared.reshared_post.post_id)
+        if path:
+            reshared_posts = self.parse_user_reshares(username,path)
+            if not isinstance(reshared_posts,list) or not(all(isinstance(r,Reshare) for r in reshared_posts)):
+                self.error("Invalid data type, parse_user_reshares return type should be Reshare[]")
 
-    def add_user_comment(self,username):
-        pass
+            for reshared in reshared_posts:
+                #Add original author to user table
+                #(o_author_id,o_author_screen_name)
+                self.add_user(reshared.original_post.author.id,reshared.original_post.author.screen_name)
+                #Add original tweet to posts table
+                #(o_post_id,o_author_id,o_text,o_created_at)
+                self.add_post(reshared.original_post.post_id,reshared.original_post.author.id,reshared.original_post.text,reshared.original_post.created_at)
+                #Add retweeted post to posts table
+                #(reshared_id,this user,rt_text,rt_created_at)
+                self.add_post(reshared.reshared_post.post_id,self.id,reshared.reshared_post.text,reshared.reshared_post.created_at)
+                #Add the reshare relationship
+                self.add_reshare(reshared.original_post.post_id,self.id,reshared.reshared_post.post_id)
+
+    def add_user_comments(self,username):
+        # fetch user comments path
+        path = self.fetch_user_comments(username,self.user_path[self.username])
+        # Parse user comments json
+        if path:
+            # Parse to return comment objects
+            comments = self.parse_user_comments(username,path)
+            if not isinstance(comments,list) or not(all(isinstance(c,Comment) for c in comments)):
+                self.error("Invalid data type, parse_user_comments return type should be Comment[]")
+
+            for comment in comments:
+                post = comment.post
+                # Add author of post to the db
+                self.add_user(post.author.id,post.author.screen_name)
+                # Add post to the db
+                self.add_post(post.post_id,post.author.id,post.text,post.created_at)
+                # Add comment to db
+                self.add_comment(post.post_id,self.id,comment.text,comment.created_at)
+
 
     def module_run(self):
         #If analysis_recon is set to true
@@ -399,6 +447,7 @@ class SocialModule(ABC,BaseModule):
                     self.add_user_favorites(self.username)
                     self.add_user_reshares(self.username)
                     self.add_user_mentions(self.username)
+                    self.add_user_comments(self.username)
                 self.output("Done. Information stored in database.")
         except:
             traceback.print_exc()
