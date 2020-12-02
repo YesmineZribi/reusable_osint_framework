@@ -25,7 +25,7 @@ class SocialModule(ABC,BaseModule):
         'options': (
             ('source_type', 'id', True, 'Set the type of the source: user_id or screen_name or id'),
             ('source', '', True, 'Set to the username(s) or id(s) of a target(s), ie1: username ie2: username1,username2'),
-            ('sleep_time', 2, False, 'Set how much time to sleep if rate limit is reached, default is 2 minutes, max is 15'),
+            ('sleep_time', 5, False, 'Set how much time to sleep if rate limit is reached, default is 2 minutes, max is 15'),
             ('analysis_recon', False, False, 'Used by the analysis module to fetch and synthesize info <not meant to be used as a standalone command>'),
         ),
     }

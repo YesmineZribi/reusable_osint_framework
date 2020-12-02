@@ -22,6 +22,13 @@ class SocialGraph(framework.Framework):
         self.G_mentions = nx.MultiDiGraph()
         self.G_comments = nx.MultiDiGraph()
 
+        # Diagraph equivalents for the multidigraphs
+        # Note: some metrics cannot be performed on digraphs
+        self.G_reshares_di = nx.DiGraph()
+        self.G_favorites_di = nx.DiGraph()
+        self.G_mentions_di = nx.DiGraph()
+        self.G_comments_di = nx.DiGraph()
+
         #For each user create its object, call its get_all (multithread eventually)?
         self.users = [] #SocialUser[]
         # Useful mapping for efficient fetching
@@ -43,15 +50,23 @@ class SocialGraph(framework.Framework):
         self.create_mentions_graph()
         self.create_comments_graph()
 
+        # Create digraph equivalents
+        self.create_reshares_di_graph()
+        self.create_favorties_di_graph()
+        self.create_mentions_di_graph()
+        self.create_comments_di_graph()
+
         #Extract all found users
         self.map_users()
 
-        self.degree_centrality = {} # Used to store centrality degree of all nodes
+        # Calculate metrics for graphs
+        self.calculate_network_metrics()
 
 
     def create_connections_graph(self):
         self.debug("Generating connections graph for users...")
         for user in self.users:
+            self.G_connections.add_node(user)
             # Add followers
             for follower in user.get_followers():
                 self.G_connections.add_edge(follower,user)
@@ -67,12 +82,12 @@ class SocialGraph(framework.Framework):
                 elif friend not in self.users: # Users followed by target users but not followed back
                     self.users_group[friend] = 3
 
-        # self.visualize_graph(self.G_connections)
-
 
     def create_reshares_graph(self):
         self.debug("Generating reshares graph for users...")
         for user in self.users:
+            # start by adding the user
+            self.G_reshares.add_node(user)
             for reshare in user.get_reshares():
                 self.G_reshares.add_edge(user,reshare.original_post.author,
                                          original_post=reshare.original_post,
@@ -81,229 +96,155 @@ class SocialGraph(framework.Framework):
                 # Unless they were already grouped in connection (in which case don't change)
                 self.users_group[reshare.original_post.author] = 1 if reshare.original_post.author not in self.users_group else self.users_group[reshare.original_post.author]
 
+    def create_reshares_di_graph(self):
+        self.debug("Generating reshares di_graph...")
+        for user in self.users:
+            self.G_reshares_di.add_node(user)
+            for reshare in user.get_reshares():
+                source = user
+                target = reshare.original_post.author
+                # If user shared multiple posts from same target
+                # Use same edge and append attribute
+                if self.G_reshares_di.has_edge(source,target):
+                    self.G_reshares_di[source][target]['reshares'].append(reshare)
+                    # Increment weight if multiple reshares
+                    self.G_reshares_di[source][target]['weight'] += 1
+                else:
+                    self.G_reshares_di.add_edge(source,target,reshares=[reshare],weight=1)
 
     def create_favorites_graph(self):
         self.debug("Generating favorites graph for users...")
         for user in self.users:
+            # Always add to graph first to account for
+            # edge case where user has no favorites
+            self.G_favorites.add_node(user)
             for favorite in user.get_favorites():
                 self.G_favorites.add_edge(user,favorite.author,favorite=favorite)
                 # favorite authors are group 1
                 self.users_group[favorite.author] = 1 if favorite.author not in self.users_group else self.users_group[favorite.author]
 
 
+    def create_favorties_di_graph(self):
+        self.debug("Generating favorites digraph...")
+        for user in self.users:
+            self.G_favorites_di.add_node(user)
+            for favorite in user.get_favorites():
+                source = user
+                target = favorite.author
+                # User liked multiple posts from same target
+                # Store all in attribute list favorites
+                # Increment weight
+                if self.G_favorites_di.has_edge(source,target):
+                    self.G_favorites_di[source][target]['favorites'].append(favorite)
+                    self.G_favorites_di[source][target]['weight'] +=1
+                else:
+                    self.G_favorites_di.add_edge(source,target,favorites=[favorite],weight=1)
+
+
     def create_mentions_graph(self):
         self.debug("Generating mentions graph for users...")
         for user in self.users:
+            # Always add user first otherwise if user has no mentions
+            # they will not get added to the graph
+            self.G_mentions.add_node(user)
             for mention in user.get_mentions():
                 self.G_mentions.add_edge(user,mention.mentioned,post=mention.post)
                 # People mentioned are group 1
                 self.users_group[mention.mentioned] = 1 if mention.mentioned not in self.users_group else self.users_group[mention.mentioned]
 
+
+    def create_mentions_di_graph(self):
+        self.debug("Generating mentions digraph...")
+        for user in self.users:
+            self.G_mentions_di.add_node(user)
+            for mention in user.get_mentions():
+                source = user
+                target = mention.mentioned
+                # User mentioned target multiple times
+                # Store all relevant posts in list mentions
+                # Increment weight
+                if self.G_mentions_di.has_edge(source,target):
+                    self.G_mentions_di[source][target]['mentions'].append(mention)
+                    self.G_mentions_di[source][target]['weight'] += 1
+                else:
+                    self.G_mentions_di.add_edge(source,target,mentions=[mention],weight=1)
+
     def create_comments_graph(self):
         self.debug("Generating comments graph for users...")
         for user in self.users:
+            # Add user node to graph first and formore to ensure
+            # edge case is covered
+            self.G_comments.add_node(user)
             for comment in user.get_comments():
                 post_author = comment.post.author
                 self.G_comments.add_edge(user,post_author,comment=comment)
                 # People mentioned are group 1
                 self.users_group[post_author] = 1 if post_author not in self.users_group else self.users_group[post_author]
-    def export_graph(self,graph_name):
-        """
-        Save the graph to a json file
-        """
-        # pos = nx.spring_layout(graph)
-        # nx.draw_networkx(graph, pos)
-        # nx.draw_networkx_edge_labels(graph, pos)
-        # plt.show()
-        data = (0,0)
+
+    def create_comments_di_graph(self):
+        self.debug("Generating comments digraph...")
+        for user in self.users:
+            self.G_comments_di.add_node(user)
+            for comment in user.get_comments():
+                source = user
+                target = comment.post.author
+                if self.G_comments_di.has_edge(source,target):
+                    # If multiple comments on same post
+                    # Append comment and increment weight
+                    self.G_comments_di[source][target]['comments'].append(comment)
+                    self.G_comments_di[source][target]['weight'] += 1
+                else:
+                    self.G_comments_di[source][target].add_edge(source,target,comments=[comment],weight=1)
+
+############################# GRAPH GETTERS ########################################################
+    def get_graph(self,graph_name):
+        graph = getattr(self,f'G_{graph_name}')
+        return graph
+
+    def get_di_graph(self,graph_name):
         if graph_name in 'connections':
-            data = self.serialize_connections_graph()
+            return self.G_connections
+        return getattr(self,f'G_{graph_name}_di')
 
-        elif graph_name in 'reshares':
-            data = self.serialize_reshares_graph()
+    def get_node(self,username):
+        return self.users_dict[username]
 
-        elif graph_name in 'mentions':
-            data = self.serialize_mentions_graph()
+    def get_edges(self,graph_name, username1,username2):
+        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
+        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+        graph = self.get_graph(graph_name)
+        return graph[user1][user2]
 
-        elif graph_name in 'favorites':
-            data = self.serialize_favorites_graph()
-        elif graph_name in 'comments':
-            data = self.serialize_comments_graph()
-        else:
-            self.error(f"Graph {graph_name} does not exist")
+    def get_edges_attr(self,graph_name,username1,username2):
+        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
+        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
+        graph = self.get_graph(graph_name)
+        return graph.get_edge_data(user1,user2,default=0)
 
-        return data
+    def get_successors(self,graph,username):
+        successors = graph.successors(self.users_dict[username])
+        return list(successors)
 
-    def serialize_connections_graph(self):
-        """
-        Serialize to JSON the connections graph
-        Given nodes and edges store custom object default serialization
-        does not work
-        """
-        if nx.is_empty(self.G_connections):
-            return
-        # Populate nodes with metrics: centrality, closeness, between, eigen
-        # will be used for display
-        self.centrality(self.G_connections)
-        self.closeness(self.G_connections)
-        self.betweenness_centrality(self.G_connections)
-        self.eigenvector_centrality(self.G_connections)
+    def get_predecessors(self,graph,username):
+        predecessors =  graph.predecessors(self.users_dict[username])
+        return list(predecessors)
 
-        nodes = []
-        nodes_index = {}
-        i = 0
-        for user in self.G_connections.nodes():
-            # Note: groups are used for coloring in D3
-            node_dict = {'betweenness':self.G_connections.nodes[user]['btwn_centrality'],
-                         'degree': self.G_connections.nodes[user]['centrality'],
-                         'eigenvector': self.G_connections.nodes[user]['eigen_centrality'],
-                         'group': self.users_group[user],
-                         'id': user.id,
-                         'name':user.screen_name,
-
-                         }
-            nodes.append(node_dict)
-
-            #Update with index
-            nodes_index[user] = i
-            i += 1
-
-        links = []
-        for users in self.G_connections.edges():
-            # each edge will be: {source: index of user 0, target: index of user 1}
-            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
-                         'weight':1}
-            links.append(edge_dict)
-        return (nodes,links)
-
-    def serialize_reshares_graph(self):
-        if nx.is_empty(self.G_reshares):
-            return
-
-        # Serialize the nodes
-        nodes = []
-        nodes_index = {}
-        i = 0
-        for user in self.G_reshares.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
-                         'degree':self.centrality(self.G_reshares,user),
-                         'betweenness':0.0, # Not yet implemented for multigraphs
-                         'eigenvector':0.0 # Not yet implemented for multigraphs
-                         }
-            nodes.append(node_dict)
-
-            #Update with index
-            nodes_index[user] = i
-            i += 1
-
-        # Serialize the edges
-        links = []
-        for users in self.G_reshares.edges(data=True):
-            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
-                         'original_post_id':users[2]['original_post'].post_id,
-                         'original_post_text':users[2]['original_post'].text,
-                         'reshared_post_id':users[2]['reshared_post'].post_id,
-                         'reshared_post_text':users[2]['reshared_post'].text,'weight':1}
-            links.append(edge_dict)
-        return (nodes,links)
-
-    def serialize_mentions_graph(self):
-        if nx.is_empty(self.G_mentions):
-            return
-
-        # Serialize the nodes
-        nodes = []
-        nodes_index = {}
-        i = 0
-        for user in self.G_mentions.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
-                         'degree': self.centrality(self.G_mentions, user),
-                         'betweenness': 0.0, # Not yet implemented for multigraphs
-                         'eigenvector': 0.0 # Not yet implemented for multigraphs
-                         }
-            nodes.append(node_dict)
-
-            #Update with index
-            nodes_index[user] = i
-            i += 1
-
-        # Serialize the edges
-        links = []
-        for users in self.G_mentions.edges(data=True):
-            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
-                         'post_id':users[2]['post'].post_id,
-                         'post_text':users[2]['post'].text,'weight':1}
-            links.append(edge_dict)
-        return (nodes,links)
-
-    def serialize_favorites_graph(self):
-        if nx.is_empty(self.G_favorites):
-            return
-        # Serialize the nodes
-        nodes = []
-        nodes_index = {}
-        i = 0
-        for user in self.G_favorites.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
-                         'degree': self.centrality(self.G_favorites, user),
-                         'betweenness': 0.0, # Not yet implemented for multigraphs
-                         'eigenvector': 0.0 # Not yet implemented for multigraphs
-                         }
-            node_dict['group'] = 0 if user in self.users else node_dict['group']
-            nodes.append(node_dict)
-
-            #Update with index
-            nodes_index[user] = i
-            i += 1
-
-        # Serialize the edges
-        links = []
-        for users in self.G_favorites.edges(data=True):
-            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
-                         'post_id':users[2]['favorite'].post_id,
-                         'post_text':users[2]['favorite'].text,'weight':1}
-            links.append(edge_dict)
-
-        return (nodes,links)
-
-    def serialize_comments_graph(self):
-        if nx.is_empty(self.G_comments):
-            return
-        # Serialize the nodes
-        nodes = []
-        nodes_index = {}
-        i = 0
-        for user in self.G_comments.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
-                         'degree': self.centrality(self.G_comments, user),
-                         'betweenness': 0.0, # Not yet implemented for multigraphs
-                         'eigenvector': 0.0 # Not yet implemented for multigraphs
-                         }
-            nodes.append(node_dict)
-            #Update with index
-            nodes_index[user] = i
-            i += 1
-
-        # Serialize the edges
-        links = []
-        for users in self.G_comments.edges(data=True):
-            edge_dict = {'source': nodes_index[users[0]], 'target': nodes_index[users[1]],
-                             'post_id': users[2]['comment'].post.post_id,
-                             'post_text': users[2]['comment'].post.text,
-                             'comment': users[2]['comment'].text,
-                             'weight': 1}
-            links.append(edge_dict)
-
-        return (nodes,links)
-
+############################# ENDOF GETTERS ########################################################
+############################ NODE RELATIONSHIP ANALYSIS #############################################
     def follows(self,username1,username2):
         if nx.is_empty(self.G_connections):
             return False
 
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
-
-        return nx.has_path(self.G_connections,user1,user2)
+        try:
+            path = nx.has_path(self.G_connections,user1,user2)
+            if path:
+                # only considred followers if there is a direct link btwn users
+                direct_path = nx.shortest_path_length(self.G_connections,user1,user2)
+                return direct_path == 1
+        except nx.NodeNotFound:
+            return False
 
 
     def reshared(self,username1,username2):
@@ -499,10 +440,373 @@ class SocialGraph(framework.Framework):
             str_repr += "}\n"
         return str_repr
 
+############################ ENDOF NODE RELATIONSHIP ANALYSIS #####################################
+############################ GRAPH STRUCTURE METRICS ##############################################
 
-    def get_graph(self,graph_name):
-        graph = getattr(self,f'G_{graph_name}')
-        return graph
+    def density(self,graph_name):
+        graph = self.get_di_graph(graph_name)
+        return nx.density(graph)
+
+    def triadic_closure(self,graph_name):
+        graph = self.get_di_graph(graph_name)
+        return nx.transitivity(graph)
+
+############################ ENDOF GRAPH STRUCTURE METRICS ##########################################
+########################### NETWORK NODE METRICS ####################################################
+
+    def calculate_network_metrics(self):
+        for graph_name in ['connections','reshares','mentions','favorites','comments']:
+            graph = self.get_di_graph(graph_name)
+            self.debug(f"Calculating centrality for {graph_name}")
+            self.calculate_centrality(graph)
+            self.debug(f"Calculating btwn for {graph_name}")
+            self.calculate_betweenness_centrality(graph)
+            self.debug(f"Calculating eigen for {graph_name}")
+            self.calculate_eigenvector_centrality(graph)
+
+    def calculate_centrality(self,graph):
+        degree_centrality = nx.degree_centrality(graph)
+        # Add it as node attribute
+        for ix,deg in degree_centrality.items():
+            graph.nodes[ix]['centrality'] = deg
+
+    def get_centrality(self, graph_name, username):
+        """
+        Degree centrality: assigns an importance based on the number of links held by each node.
+        Tells us how many 'one hop' connections each node has to other nodes in the network
+        Useful for finding connected individuals, popular individuals,individuals who are likely
+        to hold most info. or individuals who can quickly connect with the wider network
+        """
+        # If username is defined return that user centrality else whole graph's
+        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+        graph = self.get_di_graph(graph_name)
+        return graph.nodes[user]['centrality']
+
+    def in_centrality(self,graph,username=None):
+        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+        # If this function was never called, do calculation
+        degree_centrality = nx.in_degree_centrality(graph)
+        return degree_centrality[user] if username else degree_centrality
+
+    def out_centrality(self,graph,username=None):
+        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+        # If this function was never called, do calculation
+        degree_centrality = nx.out_degree_centrality(graph)
+        return degree_centrality[user] if username else degree_centrality
+
+    # TODO: Check if nodes = None is the default value for clustering
+    def local_clustering(self,graph,username=None):
+        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+        return nx.clustering(graph,nodes=user)
+
+    def global_clustering(self,graph):
+        return nx.clustering(graph)
+
+    def calculate_closeness(self,graph):
+        graph_closeness = nx.closeness_centrality(graph)
+        # Add closeness as node attribute
+        for ix, clos in graph_closeness.items():
+            graph.nodes[ix]['closeness'] = clos
+
+
+    def get_closeness(self, graph_name, username):
+        """
+        Scores each node based on their 'closeness' to all other nodes
+        in the network. Useful for finding individuals best placed to influence
+        the entire network most quickly. Can be similar for a highly connected
+        network at which point could be useful to look into Closeness in a single
+        cluster
+        """
+        user = self.users_dict[username] if not isinstance(username,SocialUser) else username
+        graph = self.get_di_graph(graph_name)
+        return graph.nodes[user]['closeness']
+
+    def calculate_betweenness_centrality(self,graph):
+        graph_betweenness = nx.betweenness_centrality(graph)
+        # If called on whole graph save measure as node attribute
+        # to be used for visualization
+        for ix,btwn in graph_betweenness.items():
+            graph.nodes[ix]['betweenness'] = btwn
+
+    def get_betweenness_centrality(self, graph_name, username):
+        """
+        Measures the number of times a node lies on the shortest path between
+        other nodes. This shows which ndoes are 'bridges' between nodes in
+        a network. Useful for finding individuals who influence the flow around a
+        system and for analyzing communication dynamics, should be used with case,
+        a high betweeness count could indicate somoene holds authority over disparate
+        clusters in a network, or just that they are on the periphery of both
+        clusters
+        """
+        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+        graph = self.get_di_graph(graph_name)
+        return graph.nodes[user]['betweenness']
+
+    def calculate_eigenvector_centrality(self,graph):
+        graph_eigen = nx.eigenvector_centrality_numpy(graph)
+        # If called on whole graph save measure as node attribute
+        # to be used for visualization
+        for ix, eig in graph_eigen.items():
+            graph.nodes[ix]['eigenvector'] = eig
+
+    def get_eigenvector_centrality(self, graph_name, username):
+        """
+        This measure can identify nodes with influence over the whole
+        network not just those directly connected to it.
+        """
+        user = self.users_dict[username] if not isinstance(username,SocialUser) else username
+        graph = self.get_di_graph(graph_name)
+        return graph.nodes[user]['eigenvector']
+
+    # # Warning: "Not implemented for directed graphs yet "
+    # def current_flow_closenness_centrality(self,graph,username=None):
+    #     user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+    #     graph_cf = nx.current_flow_closeness_centrality(graph)
+    #     return graph_cf[user] if username else graph_cf
+    #
+    # # Warning: "Not implemented for directed graphs yet "
+    # def current_flow_betweenness_centrality(self,graph,username=None):
+    #     user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
+    #     graph_cf = nx.current_flow_betweenness_centrality(graph)
+    #     return graph_cf[user] if username else graph_cf
+
+    def get_metric_attributes(self):
+        return ['centrality', 'betweenness', 'eigenvector']
+    
+    def get_top_nodes(self,graph_name,metric="centrality", top=1):
+        """
+        Args:
+            graph_name (str): name of graph
+            metric: 'centrality', 'betweenness', or 'eigenvector'
+            top (int): number of hubs to return
+            ie: top = 3: returns top 3 hubs
+        Returns:
+            ordered dict with key = hub and value = degree
+        """
+        graph = self.get_di_graph(graph_name)
+
+        valid_metric = any(m in metric for m in self.get_metric_attributes())
+        if not valid_metric:
+            self.error(f"Invalid metric {metric}, set to: 'centrality', 'betweenness', or 'eigenvector'")
+
+        if top > graph.number_of_nodes():
+            self.error(f"Top exceeds number of nodes in {graph_name}")
+
+        # graph.nodes(data="centrality") returns [(node,degree)...]
+        # Sort nodes of graph by degree (second value in tuple)
+        sorted_nodes = sorted(graph.nodes(data=metric),
+                              key = lambda x : x[1], reverse=True)
+        # Get top x
+        top_x_hubs = sorted_nodes[:top]
+        # Store in dict
+        top_x_hubs_dict = {}
+        for hub,deg in top_x_hubs:
+            top_x_hubs_dict[hub] = deg
+        return top_x_hubs_dict
+
+########################### ENDOF NETWORK METRICS ###############################################
+########################### CLUSTERING NETWORK METHODS ##########################################
+    def graph_modularity(self,graph_name):
+        """
+        Metric used to cluster the graph
+        Args:
+            graph_name -> str: name of the graph
+        Returns:
+            TBD
+        """
+        pass
+
+    def partition_graph(self,graph_name):
+        pass
+
+########################### ENDOF CLUSTERING NETWORK METHODS ####################################
+########################### NETWORK EXPORT METHDOS ###############################################
+
+    def export_graph(self,graph_name):
+        """
+        Save the graph to a json file
+        """
+        # pos = nx.spring_layout(graph)
+        # nx.draw_networkx(graph, pos)
+        # nx.draw_networkx_edge_labels(graph, pos)
+        # plt.show()
+        data = (0,0)
+        if graph_name in 'connections':
+            data = self.serialize_connections_graph()
+
+        elif graph_name in 'reshares':
+            data = self.serialize_reshares_graph()
+
+        elif graph_name in 'mentions':
+            data = self.serialize_mentions_graph()
+
+        elif graph_name in 'favorites':
+            data = self.serialize_favorites_graph()
+        elif graph_name in 'comments':
+            data = self.serialize_comments_graph()
+        else:
+            self.error(f"Graph {graph_name} does not exist")
+
+        return data
+
+    def serialize_connections_graph(self):
+        """
+        Serialize to JSON the connections graph
+        Given nodes and edges store custom object default serialization
+        does not work
+        """
+        if nx.is_empty(self.G_connections):
+            return
+
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_connections.nodes():
+            # Note: groups are used for coloring in D3
+            node_dict = {'betweenness':self.G_connections.nodes[user]['betweenness'],
+                         'degree': self.G_connections.nodes[user]['centrality'],
+                         'eigenvector': self.G_connections.nodes[user]['eigenvector'],
+                         'group': self.users_group[user],
+                         'id': user.id,
+                         'name':user.screen_name,
+
+                         }
+            nodes.append(node_dict)
+
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        links = []
+        for users in self.G_connections.edges():
+            # each edge will be: {source: index of user 0, target: index of user 1}
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'weight':1}
+            links.append(edge_dict)
+        return (nodes,links)
+
+    def serialize_reshares_graph(self):
+        if nx.is_empty(self.G_reshares):
+            return
+
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_reshares.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
+                         'degree':self.G_reshares_di.nodes[user]['centrality'],
+                         'betweenness':self.G_reshares_di.nodes[user]['betweenness'],
+                         'eigenvector':self.G_reshares_di.nodes[user]['eigenvector']
+                         }
+            nodes.append(node_dict)
+
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_reshares.edges(data=True):
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'original_post_id':users[2]['original_post'].post_id,
+                         'original_post_text':users[2]['original_post'].text,
+                         'reshared_post_id':users[2]['reshared_post'].post_id,
+                         'reshared_post_text':users[2]['reshared_post'].text,'weight':1}
+            links.append(edge_dict)
+        return (nodes,links)
+
+    def serialize_mentions_graph(self):
+        if nx.is_empty(self.G_mentions):
+            return
+
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_mentions.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
+                         'degree': self.G_mentions_di.nodes[user]['centrality'],
+                         'betweenness': self.G_mentions_di.nodes[user]['betweenness'],
+                         'eigenvector': self.G_mentions_di.nodes[user]['eigenvector']
+                         }
+            nodes.append(node_dict)
+
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_mentions.edges(data=True):
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'post_id':users[2]['post'].post_id,
+                         'post_text':users[2]['post'].text,'weight':1}
+            links.append(edge_dict)
+        return (nodes,links)
+
+    def serialize_favorites_graph(self):
+        if nx.is_empty(self.G_favorites):
+            return
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_favorites.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
+                         'degree': self.G_favorites_di.nodes[user]['centrality'],
+                         'betweenness': self.G_favorites_di.nodes[user]['betweenness'],
+                         'eigenvector': self.G_favorites_di.nodes[user]['eigenvector']
+                         }
+            node_dict['group'] = 0 if user in self.users else node_dict['group']
+            nodes.append(node_dict)
+
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_favorites.edges(data=True):
+            edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
+                         'post_id':users[2]['favorite'].post_id,
+                         'post_text':users[2]['favorite'].text,'weight':1}
+            links.append(edge_dict)
+
+        return (nodes,links)
+
+    def serialize_comments_graph(self):
+        if nx.is_empty(self.G_comments):
+            return
+        # Serialize the nodes
+        nodes = []
+        nodes_index = {}
+        i = 0
+        for user in self.G_comments.nodes():
+            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
+                         'degree': self.G_comments_di.nodes[user]['centrality'],
+                         'betweenness': 0.0, # Not yet implemented for multigraphs
+                         'eigenvector': 0.0 # Not yet implemented for multigraphs
+                         }
+            nodes.append(node_dict)
+            #Update with index
+            nodes_index[user] = i
+            i += 1
+
+        # Serialize the edges
+        links = []
+        for users in self.G_comments.edges(data=True):
+            edge_dict = {'source': nodes_index[users[0]], 'target': nodes_index[users[1]],
+                             'post_id': users[2]['comment'].post.post_id,
+                             'post_text': users[2]['comment'].post.text,
+                             'comment': users[2]['comment'].text,
+                             'weight': 1}
+            links.append(edge_dict)
+
+        return (nodes,links)
+
+########################### ENDOF NETWORK EXPORT METHDOS #################################
+############################ HELPER METHODS  #############################################
 
     def map_users(self):
         """
@@ -525,156 +829,13 @@ class SocialGraph(framework.Framework):
                 self.users_dict[key] = user
 
 
-
-    def get_node(self,username):
-        return self.users_dict[username]
-
-    def get_edges(self,graph_name, username1,username2):
-        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
-        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
-        graph = self.get_graph(graph_name)
-        return graph[user1][user2]
-
-    def get_edges_attr(self,graph_name,username1,username2):
-        user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
-        user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
-        graph = self.get_graph(graph_name)
-        return graph.get_edge_data(user1,user2,default=0)
-
-
-    def get_successors(self,graph,username):
-        successors = graph.successors(self.users_dict[username])
-        return list(successors)
-
-    def get_predecessors(self,graph,username):
-        predecessors =  graph.predecessors(self.users_dict[username])
-        return list(predecessors)
-
-    def get_all_measures(self,graph,username=None,g_clustering=False):
+    def get_all_measures(self,graph_name,username):
         metrics = {}
-        metrics['centrality'] = self.centrality(graph,username)
-        metrics['in_centrality'] = self.in_centrality(graph,username)
-        metrics['out_centrality'] = self.out_centrality(graph,username)
-        metrics['out_centrality'] = self.out_centrality(graph,username)
-        metrics['local_clustering'] = self.local_clustering(graph,username)
-        if g_clustering:
-            metrics['global_clustering'] = self.global_clustering(graph)
-        metrics['closeness'] = self.closeness(graph,username)
-        metrics['betweenness_centrality'] = self.betweenness_centrality(graph,username)
-        metrics['eigenvector_centrality'] = self.eigenvector_centrality(graph,username)
-        # Not yet implemented with directed graphs
-        # metrics['current_flow_closenness_centrality'] = self.current_flow_closenness_centrality(graph,username)
-        # metrics['current_flow_betweenness_centrality'] = self.current_flow_betweenness_centrality(graph,username)
+        metrics['centrality'] = self.get_centrality(graph_name, username)
+        metrics['betweenness_centrality'] = self.get_betweenness_centrality(graph_name, username)
+        metrics['eigenvector_centrality'] = self.get_eigenvector_centrality(graph_name,username)
         return metrics
 
-    def centrality(self,graph,username=None):
-        """
-        Degree centrality: assigns an importance based on the number of links held by each node.
-        Tells us how many 'one hop' connections each node has to other nodes in the network
-        Useful for finding connected individuals, popular individuals,individuals who are likely
-        to hold most info. or individuals who can quickly connect with the wider network
-        """
-        # If username is defined return that user centrality else whole graph's
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        # If this function was never called, do calculation
-        degree_centrality = nx.degree_centrality(graph)
-
-        # If called on whole graph save measure as node attribute
-        # to be used for visualization
-        for ix,deg in degree_centrality.items():
-            graph.nodes[ix]['centrality'] = deg
-
-        return degree_centrality[user] if username else degree_centrality
-
-    def in_centrality(self,graph,username=None):
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        # If this function was never called, do calculation
-        degree_centrality = nx.in_degree_centrality(graph)
-        return degree_centrality[user] if username else degree_centrality
-
-    def out_centrality(self,graph,username=None):
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        # If this function was never called, do calculation
-        degree_centrality = nx.out_degree_centrality(graph)
-        return degree_centrality[user] if username else degree_centrality
-
-    # TODO: Check if nodes = None is the default value for clustering
-    def local_clustering(self,graph,username=None):
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        return nx.clustering(graph,nodes=user)
-
-    def global_clustering(self,graph):
-        return nx.clustering(graph)
-
-
-    def closeness(self,graph,username=None,wf_improve=True):
-        """
-        Scores each node based on their 'closeness' to all other nodes
-        in the network. Useful for finding individuals best placed to influence
-        the entire network most quickly. Can be similar for a highly connected
-        network at which point could be useful to look into Closeness in a single
-        cluster
-        """
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        if username:
-            graph_closeness = nx.closeness_centrality(graph,user, wf_improved=wf_improve)
-        else:
-            graph_closeness = nx.closeness_centrality(graph, wf_improved=wf_improve)
-            for ix, clos in graph_closeness.items():
-                graph.nodes[ix]['closeness'] = clos
-
-        return graph_closeness
-
-    def betweenness_centrality(self,graph,username=None):
-        """
-        Measures the number of times a node lies on the shortest path between
-        other nodes. This shows which ndoes are 'bridges' between nodes in
-        a network. Useful for finding individuals who influence the flow around a
-        system and for analyzing communication dynamics, should be used with case,
-        a high betweeness count could indicate somoene holds authority over disparate
-        clusters in a network, or just that they are on the periphery of both
-        clusters
-        """
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        graph_betweenness = nx.betweenness_centrality(graph)
-        # If called on whole graph save measure as node attribute
-        # to be used for visualization
-        for ix,btwn in graph_betweenness.items():
-            graph.nodes[ix]['btwn_centrality'] = btwn
-
-        return graph_betweenness[user] if username else graph_betweenness
-
-    def eigenvector_centrality(self,graph,username=None):
-        """
-        This measure can identify nodes with influence over the whole
-        network not just those directly connected to it.
-        """
-        user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-        graph_eigen = nx.eigenvector_centrality(graph)
-        # If called on whole graph save measure as node attribute
-        # to be used for visualization
-        for ix, eig in graph_eigen.items():
-            graph.nodes[ix]['eigen_centrality'] = eig
-
-        return graph_eigen[user] if username else graph_eigen
-
-    # # Warning: "Not implemented for directed graphs yet "
-    # def current_flow_closenness_centrality(self,graph,username=None):
-    #     user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-    #     graph_cf = nx.current_flow_closeness_centrality(graph)
-    #     return graph_cf[user] if username else graph_cf
-    #
-    # # Warning: "Not implemented for directed graphs yet "
-    # def current_flow_betweenness_centrality(self,graph,username=None):
-    #     user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
-    #     graph_cf = nx.current_flow_betweenness_centrality(graph)
-    #     return graph_cf[user] if username else graph_cf
-
-
-
-
-
-
-
+############################ ENDOF HELPER METHODS  #############################################
 
 

@@ -3,7 +3,8 @@ from recon.core.module import BaseModule
 # mixins for desired functionality
 from recon.mixins.social_user import SocialUser
 from recon.mixins.social_graph import SocialGraph
-from recon.mixins.social_report import *
+from recon.mixins.social_user_report import *
+from recon.mixins.graph_report import *
 # module specific imports
 import os
 from itertools import combinations
@@ -33,6 +34,7 @@ class Module(BaseModule):
             ('recon_module','twitter_user',True,'Set to the name of the recon module to use (must already be installed)'),
             ('generate_report',True,True,'Set to True to generate reports'),
             ('user_analysis', True,False,'Set to True to get user metrics'),
+            ('relationship_analysis', True,False,'Set to True to get user metrics'),
             ('connection_analysis',True,False,'Set to True to analyse user connections'),
             ('reshare_analysis',True,False,'Set to True to analyse user\'s post sharing relationship'),
             ('mention_analysis',True,False,'Set to True to analyse users\' mentions relationship'),
@@ -40,6 +42,7 @@ class Module(BaseModule):
             ('comment_analysis',True,False,'Set to True to analyse user\'s post comment relationship'),
             ('save_graphs',True,False,'Saves the graphs to json files to be used by visualization module'),
             ('fetch_account_info',False,False,'Set to True to run recon'),
+            ('top',3,False,'Set to the number of prominent nodes to display, default 3, ie: will show top 3 hubs, top 3 brokers, etc.')
         ),
     }
 
@@ -67,6 +70,24 @@ class Module(BaseModule):
         # Get all pair combinations from the list of users given - needed later
         self.all_pairs = list(combinations(self.handles,2))
 
+        # Append graphs enabled by user
+        self.graph_names = []
+        if self.options['connection_analysis']:
+            self.graph_names.append('connections')
+        if self.options['reshare_analysis']:
+            self.graph_names.append('reshares')
+        if self.options['mention_analysis']:
+            self.graph_names.append('mentions')
+        if self.options['favorite_analysis']:
+            self.graph_names.append('favorites')
+        if self.options['comment_analysis']:
+            self.graph_names.append('comments')
+
+        self.graph_reports = {}
+        # Initialize graph reports for each graph
+        for graph_name in self.graph_names:
+            self.graph_reports[graph_name] = GraphReport(graph_name)
+
         #Create graphs
         self.output("Creating graphs...")
         self.graphs = SocialGraph(self.options['source_type'],self.handles)
@@ -84,23 +105,90 @@ class Module(BaseModule):
         if not os.path.exists(self.session_path):
             os.makedirs(self.session_path, mode=0o777)
 
-
+        # Build needed db tables
+        self.debug("Building graphs schema...")
+        self.create_graph_schema()
+        self.debug("Building targets schema...")
+        self.create_targets_schema()
+        self.debug("Building reports schema...")
 
     def module_run(self):
-        # Create User report class for each user
         self.output("Initiating analysis...")
+        dirname = f"{self.options['recon_module']}_network_reports"
+        filename = f"network_report"
+        ############# GRAPH  ANALYSIS #################################
+        for graph_name, graph_report in self.graph_reports.items():
+            # Get important metrics for graphs and store results in graph_report
+            self.graph_structure_analysis(graph_name,graph_report)
+            self.graph_node_analysis(graph_name,graph_report)
+            self.graph_cluster_analysis(graph_name,graph_report)
+            self.generate_report(graph_report,dirname,filename)
+
+        ############ TARGET USERS ANALYSIS #############################
+
         if self.options['user_analysis']:
-            self.debug("Started user analysis....")
-            self.user_reports = {}
-            for handle in self.handles:
-                # Get User metrics
-                metrics = self.graphs.get_all_measures(self.graphs.G_connections,handle)
-                user_obj = self.graphs.get_node(handle)
-                user_report = UserReport(user_obj,metrics)
-                self.user_reports[handle] = user_report # Store measures for that user
-            self.debug("User analysis complete.")
-        #Iterate over each pair of users and analyse relationship
+            self.single_user_analysis()
+        ############### RELATIONSHIP ANALYSIS #####################
+        if self.options['relationship_analysis']:
+            self.relationship_analysis()
+
+        if self.options['save_graphs']:
+            self.output("Exporting graphs...")
+            self.save_graphs()
+            self.debug("Finished exporting graphs ")
+
+        self.output("Analysis COMPLETE.")
+        self.output(f"results stored in {self.session_path}")
+
+    def fetch_bulk_account_info(self):
+        # Create temp file to store commands
+        tmp_file = './cmds.txt'
+        workspace = os.path.basename(os.path.normpath(self.workspace))
+        with open(tmp_file, 'w+') as file:
+            file.write(f"workspaces load {workspace}\n")
+            file.write(f"modules load {self.options['recon_module']}\n")
+            file.write(f"options set analysis_recon TRUE\n")
+            file.write(f"options set source_type {self.options['source_type']}\n")
+            file.write(f"options set source {self.options['usernames']}\n")
+            file.write(f"run\n")
+            file.write(f"exit\n")
+
+        # Open subprocess and run commands
+        subprocess.call(f"./recon-ng -r {tmp_file}",shell=True)
+
+        #Delete file
+        os.remove(tmp_file)
+
+############################### ANALYSIS METHODS ####################################
+    def single_user_analysis(self):
+        self.debug("Started user analysis....")
+        # Name of dir under which to store reports
+        dirname = f"{self.options['recon_module']}_single_reports"
+        self.user_reports = {}
+        for handle in self.handles:
+            # Add user in target db
+            self.add_target(handle)
+            # Get User metrics
+            # Stores {graph : {centrality:x,btwnness:y..}..}
+            metrics = {}
+            for graph_name in self.graph_names:
+                metrics[graph_name] = self.graphs.get_all_measures(graph_name,handle)
+            # Get node to display in report
+            user_obj = self.graphs.get_node(handle)
+            # Store in user report
+            user_report = UserReport(user_obj, metrics)
+            self.user_reports[handle] = user_report  # Store measures for that user
+            filename = f"{handle}_report"
+            self.generate_report(user_report,dirname,filename)
+        self.debug("User analysis complete.")
+        self.debug("Generating user reports...")
+
+    def relationship_analysis(self):
+        # directory under which to save relationship reports
+        dirname = f"{self.options['recon_module']}_relationship_reports"
+        # Iterate over each pair of users and analyse relationship
         for pair in self.all_pairs:
+            self.debug(f"Analyzing pair: {pair}")
             username1 = pair[0]
             username2 = pair[1]
             user_obj1 = self.graphs.get_node(username1)
@@ -136,42 +224,42 @@ class Module(BaseModule):
                 self.debug("Comment analysis complete.")
 
             self.output("Generating report...")
-            self.generate_report(rel_obj)
-            self.debug("Finished generating reports.")
+            filename = f'{rel_obj.user1.screen_name}_{rel_obj.user2.screen_name}_relationship_rep'
+            # self.generate_rel_report(rel_obj)
+            self.generate_report(rel_obj,dirname,filename)
+            self.debug(f"Finished generating reports for pair {pair}.")
+            # print summary
+            rel_obj.print_summary()
 
+    def graph_structure_analysis(self,graph_name, graph_report):
+        # Get density of the graph
+        graph_density = self.graphs.density(graph_name)
+        graph_triadic_closure = self.graphs.triadic_closure(graph_name)
 
-        if self.options['save_graphs']:
-            self.output("Exporting graphs...")
-            self.save_graphs()
-            self.debug("Finished exporting graphs ")
+        # Add info to report
+        graph_report.set_density(graph_density)
+        graph_report.set_triadic_closure(graph_triadic_closure)
 
-        self.output("Analysis COMPLETE.")
-        self.output(f"results stored in {self.session_path}")
-        # print summary
-        rel_obj.print_summary()
+    def graph_node_analysis(self, graph_name, graph_report):
+        self.debug(f"{graph_name} important nodes:")
+        # Get hubs -> highest centrality
+        graph_report.set_hubs(self.graphs.get_top_nodes(graph_name, "centrality", self.options['top']))
+        self.debug(f"Hubs: {graph_report.hubs}")
+        # Get brokers --> highest betweeneess
+        graph_report.set_brokers(self.graphs.get_top_nodes(graph_name, "betweenness", self.options['top']))
+        self.debug(f"Brokers: {graph_report.brokers}")
+        # Get influencers --> highest eigenvector value
+        graph_report.set_influencers(self.graphs.get_top_nodes(graph_name, "eigenvector", self.options['top']))
+        self.debug(f"Influencers: {graph_report.influencers}")
 
+    def graph_cluster_analysis(self,graph_name, graph_report):
+        pass
 
-    def fetch_bulk_account_info(self):
-        # Create temp file to store commands
-        tmp_file = './cmds.txt'
-        workspace = os.path.basename(os.path.normpath(self.workspace))
-        with open(tmp_file, 'w+') as file:
-            file.write(f"workspaces load {workspace}\n")
-            file.write(f"modules load {self.options['recon_module']}\n")
-            file.write(f"options set source_type {self.options['source_type']}\n")
-            file.write(f"options set source {self.options['usernames']}\n")
-            file.write(f"run\n")
-            file.write(f"exit\n")
+############################### ENDOF ANALYSIS METHODS ##############################
+############################### COMMUNITY DETECTION HELPERS #########################
 
-        # Open subprocess and run commands
-        subprocess.call(f"./recon-ng -r {tmp_file}",shell=True)
-
-        #Delete file
-        os.remove(tmp_file)
-
-
-
-    #Analyze graph method
+############################### ENDOF COMMUNITY DETECTION HELPERS ###################
+################## RELATIONSHIP ANALYSIS HELPERS ####################################
     def connection_analysis(self,username1,username2,rel_obj):
         self.friendship_analysis(username1,username2,rel_obj)
         self.commons_conn_analysis(username1, username2, rel_obj)
@@ -181,6 +269,7 @@ class Module(BaseModule):
         u1_follows_u2 = self.graphs.follows(username1, username2)
         u2_follows_u1 = self.graphs.follows(username2, username1)
         if u1_follows_u2 and u2_follows_u1:
+            self.alert(f"bidirection for {username1} and {username2}")
             rel_obj.set_connection(Connection.BIDIRECTIONAL)
         elif u1_follows_u2:
             rel_obj.set_connection(Connection.UNIDIRECTIONAL,source=username1,target=username2)
@@ -237,7 +326,6 @@ class Module(BaseModule):
                 #Save this to report class
                 rel_obj.set_common_src_reshares(user,src,reshares)
 
-
     def mention_analysis(self,username1,username2,rel_obj):
         # Get posts in which u1 mentions u2 and vice versa
         self.direct_mention(username1,username2,rel_obj)
@@ -291,7 +379,6 @@ class Module(BaseModule):
                 favorites = self.graphs.get_all_favorites_from_src(user,src)
                 rel_obj.set_common_src_favorites(user,src,favorites)
 
-
     def comment_analysis(self,username1,username2,rel_obj):
         self.direct_comment(username1,username2,rel_obj)
         self.common_source_comment(username1,username2,rel_obj)
@@ -319,18 +406,26 @@ class Module(BaseModule):
 
         self.debug("Common source comment analysis complete.")
 
-    def generate_report(self,rel_obj):
-        reports_path = os.path.join(self.session_path,f"{self.options['recon_module']}_reports")
+################## ENDOF RELATIONSHIP ANALYSIS HELPERS ###############################
+################################### REPORT METHOD ###################################
+    def generate_report(self,report_obj,dirname,filename):
+        """
+        Saves the report in a file
+        Args:
+            report_obj -> Report: report object to save
+            dirname -> str: name of directory in which to save report
+            filename -> str: name of file under which to save report obj
+        Returns:
+            None
+        """
+        reports_path = os.path.join(self.session_path, dirname)
         if not os.path.exists(reports_path):
             os.makedirs(reports_path,mode=0o777)
+        report_file = os.path.join(reports_path,f'{filename}.txt')
+        with open(report_file, 'a') as file:
+            file.write(str(report_obj))
 
-        report_file = os.path.join(reports_path,f'{rel_obj.user1.screen_name}_{rel_obj.user2.screen_name}_relationship_rep.txt')
-        with open(report_file,'w') as file:
-            file.write(rel_obj.summary_report_format())
-            file.write(str(rel_obj))
-
-        #TODO: save path of report in DB
-
+################################### ENDOF REPORT METHODS ##############################
 
     def save_graphs(self):
 
@@ -338,7 +433,7 @@ class Module(BaseModule):
         if not os.path.exists(graphs_dir):
             os.makedirs(graphs_dir,mode=0o777)
         # For each graph get the date
-        for graph_name in ['connections','mentions','reshares','favorites','comments']:
+        for graph_name in self.graph_names:
             #Get the graph's json
             graph_data = self.graphs.export_graph(graph_name)
             if not graph_data:
@@ -351,5 +446,28 @@ class Module(BaseModule):
             with open(graph_json, 'w') as file:
                 json.dump({'links':graph_data[1],'nodes':graph_data[0]}, file, indent=4)
             self.debug(f"{graph_name} graph saved in {graph_json}")
+            # Add graph to db
+            self.add_graph(graph_name,graph_json)
 
-            #TODO: save path of graphs in db
+######### DATABASE HELPER METHODS ###############
+    def create_graph_schema(self):
+        self.query("""
+        CREATE TABLE IF NOT EXISTS graphs(
+        graph_name TEXT,
+        graph_path TEXT,
+        PRIMARY KEY(graph_name) )
+        """)
+
+    def create_targets_schema(self):
+        self.query("""
+        CREATE TABLE IF NOT EXISTS targets(
+        username TEXT,
+        PRIMARY KEY (username)
+        ) 
+        """)
+
+    def add_graph(self, graph_name, graph_path):
+        self.query(f"INSERT OR REPLACE INTO graphs(graph_name,graph_path) VALUES('{graph_name}','{graph_path}')")
+
+    def add_target(self, username):
+        self.query(f"INSERT OR REPLACE INTO targets(username) VALUES ('{username}')")

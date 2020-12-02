@@ -2,11 +2,26 @@
 <meta charset="utf-8">
 
 <body>
+    <h1>Graph Visualization Module</h1>
+    <h2>Target Users</h2>
+    <ul>
+        {% for target in targets%}
+        <li><h3>{{ target }}</h3></li>
+        {% endfor %}
+    </ul>
+    <br><br>
+    <h2>Social Graphs</h2>
     {% for graph_name in graphs %}
     {% if 'connections' in graph_name %}
     <a href="{{ url_for('go_conn') }}">{{graph_name}} graph</a><br>
     {% elif 'reshares' in graph_name %}
     <a href="{{ url_for('go_res') }}">{{graph_name}} graph</a><br>
+    {% elif 'mentions' in graph_name %}
+    <a href="{{ url_for('go_men') }}">{{graph_name}} graph</a><br>
+    {% elif 'favorites' in graph_name %}
+    <a href="{{ url_for('go_fav') }}">{{graph_name}} graph</a><br>
+    {% elif 'comments' in graph_name %}
+    <a href="{{ url_for('go_com') }}">{{graph_name}} graph</a><br>
     {% endif %}
     {% endfor %}
 </body>

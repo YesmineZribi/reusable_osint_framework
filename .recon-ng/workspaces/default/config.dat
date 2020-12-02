@@ -25,5 +25,8 @@
         "SLEEP_TIME": 5,
         "GET_STATUS": true,
         "DEFAULT": true
+    },
+    "base": {
+        "VERBOSITY": 0
     }
 }

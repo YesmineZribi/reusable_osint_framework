@@ -13,11 +13,19 @@ class UserReport(framework.Framework):
         self.user = user
         self.measures = measures
 
+    def graph_metric_format(self,graph_name,metrics):
+        string_rep = f"Node metrics in {graph_name}\n"
+        for metric,value in metrics.items():
+            string_rep += f"\t{metric}: {value}\n"
+        return string_rep
+
 
     def __repr__(self):
-        string_rep = f"User: {self.user}"
-        for key,value in self.measures.items():
-            string_rep += f"{key}: {value}\n"
+        string_rep = f"User screen name: {self.user.screen_name}\n"
+        string_rep = f"User id: {self.user.id}\n"
+        for graph_name,metric_dict in self.measures.items():
+            string_rep += self.graph_metric_format(graph_name,metric_dict)
+            string_rep += "\n\n"
         return string_rep
 
 class RelationshipReport(framework.Framework):
@@ -157,7 +165,7 @@ class RelationshipReport(framework.Framework):
         if self.reshare_analysis:
             string_rep += "************* Post Analysis *************\n"
             string_rep += f"Post Sharing: \n"
-            string_rep += "" if self.reshares else "NONE"
+            string_rep += "" if self.reshares else "NONE\n"
             for key,posts in self.reshares.items():
                 user1 = key[0]
                 user2 = key[1]
@@ -185,7 +193,7 @@ class RelationshipReport(framework.Framework):
         if self.mention_analysis:
             string_rep += "************* Mention Analysis *************\n"
             string_rep += f"Direct Mentions: \n"
-            string_rep += "" if self.mentions else "NONE"
+            string_rep += "" if self.mentions else "NONE\n"
             if not self.mentions:
                 return string_rep
             for key,posts in self.mentions.items():
@@ -208,7 +216,7 @@ class RelationshipReport(framework.Framework):
         if self.favortie_analysis:
             string_rep += "************* Likes Analysis *************\n"
             string_rep += f"Direct Likes: \n"
-            string_rep += "" if self.favorites else "NONE"
+            string_rep += "" if self.favorites else "NONE\n"
             if not self.favorites:
                 return string_rep
             for key,posts in self.favorites.items():
@@ -231,7 +239,7 @@ class RelationshipReport(framework.Framework):
         if self.comment_analysis:
             string_rep += "************* Comment Analysis *************\n"
             string_rep += f"Direct Comments: \n"
-            string_rep += "" if self.comments else "NONE"
+            string_rep += "" if self.comments else "NONE\n"
             for key,comments in self.comments.items():
                 user1 = key[0]
                 user2 = key[1]
@@ -365,8 +373,8 @@ class RelationshipReport(framework.Framework):
             else:
                 string_rep += f"#\t{self.user1} and {self.user2} do not have common connections\n"
         if self.reshare_analysis:
-            string_rep += "# A reshare relationship was found\n"
             if self.reshares:
+                string_rep += "# A reshare relationship was found\n"
                 for key in self.reshares:
                     user1 = key[0]
                     user2 = key[1]
@@ -374,8 +382,8 @@ class RelationshipReport(framework.Framework):
             if self.user1_reshares:
                 string_rep +="#\tBoth users shared posts from common sources\n"
         if self.mention_analysis:
-            string_rep += "# A mention relationship was found\n"
             if self.mentions:
+                string_rep += "# A mention relationship was found\n"
                 for key in self.mentions:
                     user1 = key[0]
                     user2 = key[1]
@@ -383,8 +391,8 @@ class RelationshipReport(framework.Framework):
             if self.user1_mentions:
                 string_rep += "#\tBoth users mentioned common source(s) in at least one post\n"
         if self.favortie_analysis:
-            string_rep += "# A favorite relationship was found\n"
             if self.favorites:
+                string_rep += "# A favorite relationship was found\n"
                 for key in self.favorites:
                     user1 = key[0]
                     user2 = key[1]
@@ -393,8 +401,8 @@ class RelationshipReport(framework.Framework):
                 string_rep +="#\tBoth users liked at least one post from common source(s)\n"
 
         if self.comment_analysis:
-            string_rep += "# A comment relationship was found\n"
             if self.comments:
+                string_rep += "# A comment relationship was found\n"
                 for key in self.comments:
                     user1 = key[0]
                     user2 = key[1]
