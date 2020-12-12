@@ -1,10 +1,11 @@
 from recon.core import framework
 from recon.mixins.social_user import SocialUser
 from recon.mixins.social_post import *
-from collections import defaultdict
+from networkx.algorithms import community
+import community as louvain_community
 
 import networkx as nx
-import matplotlib.pyplot as plt
+from operator import itemgetter
 
 import json
 import os
@@ -33,14 +34,14 @@ class SocialGraph(framework.Framework):
         self.users = [] #SocialUser[]
         # Useful mapping for efficient fetching
         self.users_dict = {} #{screen_name: SocialUser}
-        # Stores the group number of each user, used for visualization for coloring nodes
-        self.users_group = {} #{SocialUser: group#}
+        # keep track of the number of communities per graph
+        self.graph_community_len = {}
+
         for username in usernames:
             user = SocialUser(**{source_type: username})
             user.get_all()
             self.users.append(user)
             self.users_dict[username] = user
-            self.users_group[user] = 0 # Target users are group 0
 
         #Create the graphs
 
@@ -70,17 +71,9 @@ class SocialGraph(framework.Framework):
             # Add followers
             for follower in user.get_followers():
                 self.G_connections.add_edge(follower,user)
-                if follower not in (self.users_group or self.users):
-                    self.users_group[follower] = 1
             # Add friends
             for friend in user.get_friends():
                 self.G_connections.add_edge(user,friend)
-                # Friends of target users are group 2
-                # Friends that are also followers are group 4 (target users remain in group 0)
-                if friend not in self.users_group:
-                    self.users_group[friend] = 2
-                elif friend not in self.users: # Users followed by target users but not followed back
-                    self.users_group[friend] = 3
 
 
     def create_reshares_graph(self):
@@ -92,9 +85,6 @@ class SocialGraph(framework.Framework):
                 self.G_reshares.add_edge(user,reshare.original_post.author,
                                          original_post=reshare.original_post,
                                          reshared_post=reshare.reshared_post)
-                # People whose posts target users shared are group 1 in reshare group
-                # Unless they were already grouped in connection (in which case don't change)
-                self.users_group[reshare.original_post.author] = 1 if reshare.original_post.author not in self.users_group else self.users_group[reshare.original_post.author]
 
     def create_reshares_di_graph(self):
         self.debug("Generating reshares di_graph...")
@@ -113,15 +103,15 @@ class SocialGraph(framework.Framework):
                     self.G_reshares_di.add_edge(source,target,reshares=[reshare],weight=1)
 
     def create_favorites_graph(self):
-        self.debug("Generating favorites graph for users...")
+        self.verbose("Generating favorites graph for users...")
         for user in self.users:
             # Always add to graph first to account for
             # edge case where user has no favorites
             self.G_favorites.add_node(user)
             for favorite in user.get_favorites():
+                if user.screen_name == "data6ase" and favorite.author.screen_name == "LilSimSwapper":
+                    self.verbose(favorite)
                 self.G_favorites.add_edge(user,favorite.author,favorite=favorite)
-                # favorite authors are group 1
-                self.users_group[favorite.author] = 1 if favorite.author not in self.users_group else self.users_group[favorite.author]
 
 
     def create_favorties_di_graph(self):
@@ -149,8 +139,6 @@ class SocialGraph(framework.Framework):
             self.G_mentions.add_node(user)
             for mention in user.get_mentions():
                 self.G_mentions.add_edge(user,mention.mentioned,post=mention.post)
-                # People mentioned are group 1
-                self.users_group[mention.mentioned] = 1 if mention.mentioned not in self.users_group else self.users_group[mention.mentioned]
 
 
     def create_mentions_di_graph(self):
@@ -178,8 +166,6 @@ class SocialGraph(framework.Framework):
             for comment in user.get_comments():
                 post_author = comment.post.author
                 self.G_comments.add_edge(user,post_author,comment=comment)
-                # People mentioned are group 1
-                self.users_group[post_author] = 1 if post_author not in self.users_group else self.users_group[post_author]
 
     def create_comments_di_graph(self):
         self.debug("Generating comments digraph...")
@@ -258,6 +244,11 @@ class SocialGraph(framework.Framework):
 
         if not reshared:
             return False
+
+        reshared_path_length = nx.shortest_path_length(self.G_reshares,user1,user2)
+        if reshared_path_length > 1:
+            # indirect reshare
+            return False
         posts = []
         reshare_edges = self.G_reshares[user1][user2]
         for key,edge_attr in reshare_edges.items():
@@ -276,10 +267,13 @@ class SocialGraph(framework.Framework):
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
 
-        favored = nx.has_path(self.G_favorites,user1,user2)
+        favored_path = nx.has_path(self.G_favorites,user1,user2)
+        if not favored_path:
+            return False
 
-
-        if not favored:
+        favorite_path_length = nx.shortest_path_length(self.G_favorites,user1,user2)
+        if favorite_path_length > 1:
+            # indirect favorite
             return False
 
         # Collect all posts liked by user1 that were authored by user2
@@ -302,6 +296,11 @@ class SocialGraph(framework.Framework):
         if not mentioned:
             return False
 
+        mentioned_path_length = nx.shortest_path_length(self.G_mentions,user1,user2)
+        if mentioned_path_length > 1:
+            # indirect reshare
+            return False
+
         #Collect all posts in which user1 mentions user2
         mentioned_posts = []
         mentioned_edges = self.G_mentions[user1][user2]
@@ -318,6 +317,11 @@ class SocialGraph(framework.Framework):
         commented = nx.has_path(self.G_comments,user1,user2)
 
         if not commented:
+            return False
+
+        commented_path_length = nx.shortest_path_length(self.G_comments,user1,user2)
+        if commented_path_length > 1:
+            # indirect reshare
             return False
 
         #Collect all posts in which user1 commented on post from user2
@@ -430,6 +434,9 @@ class SocialGraph(framework.Framework):
         if nx.is_empty(graph):
             return ""
 
+        if not nx.has_path(graph,user1,user2):
+            return "NO PATH\n"
+
         shortest_paths = nx.all_shortest_paths(graph,user1,user2)
 
         str_repr = ""
@@ -446,6 +453,7 @@ class SocialGraph(framework.Framework):
     def density(self,graph_name):
         graph = self.get_di_graph(graph_name)
         return nx.density(graph)
+
 
     def triadic_closure(self,graph_name):
         graph = self.get_di_graph(graph_name)
@@ -522,7 +530,12 @@ class SocialGraph(framework.Framework):
         return graph.nodes[user]['closeness']
 
     def calculate_betweenness_centrality(self,graph):
-        graph_betweenness = nx.betweenness_centrality(graph)
+        # Get number of nodes
+        node_num = graph.number_of_nodes()
+        # use less nodes if number of nodes is higher than 500
+        # 50% less ?
+        k = int(node_num / 3)
+        graph_betweenness = nx.betweenness_centrality(graph, k=k)
         # If called on whole graph save measure as node attribute
         # to be used for visualization
         for ix,btwn in graph_betweenness.items():
@@ -543,7 +556,10 @@ class SocialGraph(framework.Framework):
         return graph.nodes[user]['betweenness']
 
     def calculate_eigenvector_centrality(self,graph):
-        graph_eigen = nx.eigenvector_centrality_numpy(graph)
+        try:
+            graph_eigen = nx.eigenvector_centrality_numpy(graph)
+        except TypeError as t:
+            graph_eigen = nx.eigenvector_centrality(graph)
         # If called on whole graph save measure as node attribute
         # to be used for visualization
         for ix, eig in graph_eigen.items():
@@ -579,21 +595,25 @@ class SocialGraph(framework.Framework):
             graph_name (str): name of graph
             metric: 'centrality', 'betweenness', or 'eigenvector'
             top (int): number of hubs to return
-            ie: top = 3: returns top 3 hubs
+            ie: top = 3: returns top 3 hubs or brokers or influencers
         Returns:
             ordered dict with key = hub and value = degree
         """
         graph = self.get_di_graph(graph_name)
+        if nx.is_empty(graph):
+            return {}
 
         valid_metric = any(m in metric for m in self.get_metric_attributes())
         if not valid_metric:
             self.error(f"Invalid metric {metric}, set to: 'centrality', 'betweenness', or 'eigenvector'")
 
         if top > graph.number_of_nodes():
-            self.error(f"Top exceeds number of nodes in {graph_name}")
+            self.alert(f"Top exceeds number of nodes in {graph_name}")
+            self.alert(f"Setting top to {graph.number_of_nodes()}")
+            top = graph.number_of_nodes()
 
         # graph.nodes(data="centrality") returns [(node,degree)...]
-        # Sort nodes of graph by degree (second value in tuple)
+        # Sort nodes of graph by metric (second value in tuple)
         sorted_nodes = sorted(graph.nodes(data=metric),
                               key = lambda x : x[1], reverse=True)
         # Get top x
@@ -608,16 +628,92 @@ class SocialGraph(framework.Framework):
 ########################### CLUSTERING NETWORK METHODS ##########################################
     def graph_modularity(self,graph_name):
         """
-        Metric used to cluster the graph
+        Community detection using modularity, sets the
+        community/group # as node attribute
         Args:
             graph_name -> str: name of the graph
         Returns:
-            TBD
+            Number of communities found
         """
-        pass
+        # Modularity is not yet implemented for directed graphs
+        # need to convert to undirected
+        # Note: loss of information when analyzing
+        graph = self.get_di_graph(graph_name)
+        # Convert to undirected
+        undirected_graph = nx.Graph(graph)
+        communities = community.greedy_modularity_communities(undirected_graph)
+        # Add community number as group
+        modularity_dict = {}
+        for i, c in enumerate(communities):
+            for user in c:
+                # Key = user
+                # Value = group # they belong to
+                modularity_dict[user] = i
 
-    def partition_graph(self,graph_name):
-        pass
+        # Add as node attribute
+        nx.set_node_attributes(graph,modularity_dict, 'group')
+        # Store value for future reference
+        self.graph_community_len[graph_name] = len(communities)
+        # Return number of communities
+        return self.graph_community_len[graph_name]
+
+    def graph_best_partition(self,graph_name):
+        """
+        Community detection using louvain algorithm
+        Args:
+            graph_name -> str: name of the graph
+        Returns:
+            None
+        """
+        graph = self.get_di_graph(graph_name)
+        # Convert to undirected
+        undirected_graph = nx.Graph(graph)
+        communities = louvain_community.best_partition(undirected_graph)
+
+        # Add as node attribute
+        nx.set_node_attributes(graph,communities, 'group')
+        # Stores the number of communities found in the graph
+        self.graph_community_len[graph_name] = max(communities.values())+1
+        # Return number of communities
+        return self.graph_community_len[graph_name]
+
+    def get_community_metrics(self,graph_name, index=0,top=1):
+        """
+        Returns metrics for the community labelled with index
+        Args:
+            graph_name -> str: name of the graph
+            index -> int: index of the community
+        Returns:
+            list of nodes beloning to the same community
+        """
+        # Ensure index < community
+        if self.graph_community_len[graph_name] < index:
+            self.error("Index out of range")
+
+
+        # Get digraph
+        graph = self.get_di_graph(graph_name)
+        # Get all nodes which group == index
+        community = [n for n in graph.nodes() if graph.nodes[n]['group'] == index]
+
+        # Ensure top <= number of nodes in the community
+        if len(community) < top:
+            self.alert(f"Top out of range, community length {len(community)}")
+            self.alert(f"Setting top to {len(community)}")
+            top = len(community)
+        # Get community metrics
+        community_metrics = {}
+        for metric in self.get_metric_attributes():
+            # Get metrics for nodes in the community
+            community_metric = {n:graph.nodes[n][metric] for n in community}
+            # Sorted in descending order (highest to lowest)
+            community_metric_sorted = sorted(community_metric.items(), key=itemgetter(1), reverse=True)
+            # Store top x nodes with that metric
+            community_metrics[metric] = community_metric_sorted[:top]
+
+        self.debug(community_metrics)
+        return community_metrics
+
 
 ########################### ENDOF CLUSTERING NETWORK METHODS ####################################
 ########################### NETWORK EXPORT METHDOS ###############################################
@@ -666,7 +762,7 @@ class SocialGraph(framework.Framework):
             node_dict = {'betweenness':self.G_connections.nodes[user]['betweenness'],
                          'degree': self.G_connections.nodes[user]['centrality'],
                          'eigenvector': self.G_connections.nodes[user]['eigenvector'],
-                         'group': self.users_group[user],
+                         'group': self.G_connections.nodes[user]['group'],
                          'id': user.id,
                          'name':user.screen_name,
 
@@ -694,7 +790,7 @@ class SocialGraph(framework.Framework):
         nodes_index = {}
         i = 0
         for user in self.G_reshares.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
+            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.G_reshares_di.nodes[user]['group'],
                          'degree':self.G_reshares_di.nodes[user]['centrality'],
                          'betweenness':self.G_reshares_di.nodes[user]['betweenness'],
                          'eigenvector':self.G_reshares_di.nodes[user]['eigenvector']
@@ -712,7 +808,8 @@ class SocialGraph(framework.Framework):
                          'original_post_id':users[2]['original_post'].post_id,
                          'original_post_text':users[2]['original_post'].text,
                          'reshared_post_id':users[2]['reshared_post'].post_id,
-                         'reshared_post_text':users[2]['reshared_post'].text,'weight':1}
+                         'reshared_post_text':users[2]['reshared_post'].text,
+                         'weight':self.G_reshares_di[users[0]][users[1]]['weight']}
             links.append(edge_dict)
         return (nodes,links)
 
@@ -725,7 +822,7 @@ class SocialGraph(framework.Framework):
         nodes_index = {}
         i = 0
         for user in self.G_mentions.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
+            node_dict = {'name':user.screen_name,'id':user.id,'group':self.G_mentions_di.nodes[user]['group'],
                          'degree': self.G_mentions_di.nodes[user]['centrality'],
                          'betweenness': self.G_mentions_di.nodes[user]['betweenness'],
                          'eigenvector': self.G_mentions_di.nodes[user]['eigenvector']
@@ -741,7 +838,8 @@ class SocialGraph(framework.Framework):
         for users in self.G_mentions.edges(data=True):
             edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
                          'post_id':users[2]['post'].post_id,
-                         'post_text':users[2]['post'].text,'weight':1}
+                         'post_text':users[2]['post'].text,
+                         'weight':self.G_mentions_di[users[0]][users[1]]['weight']}
             links.append(edge_dict)
         return (nodes,links)
 
@@ -753,7 +851,7 @@ class SocialGraph(framework.Framework):
         nodes_index = {}
         i = 0
         for user in self.G_favorites.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.users_group[user],
+            node_dict = {'name':user.screen_name,'id':user.id, 'group':self.G_favorites_di.nodes[user]['group'],
                          'degree': self.G_favorites_di.nodes[user]['centrality'],
                          'betweenness': self.G_favorites_di.nodes[user]['betweenness'],
                          'eigenvector': self.G_favorites_di.nodes[user]['eigenvector']
@@ -770,7 +868,8 @@ class SocialGraph(framework.Framework):
         for users in self.G_favorites.edges(data=True):
             edge_dict = {'source':nodes_index[users[0]], 'target': nodes_index[users[1]],
                          'post_id':users[2]['favorite'].post_id,
-                         'post_text':users[2]['favorite'].text,'weight':1}
+                         'post_text':users[2]['favorite'].text,
+                         'weight':self.G_favorites_di[users[0]][users[1]]['weight']}
             links.append(edge_dict)
 
         return (nodes,links)
@@ -783,10 +882,10 @@ class SocialGraph(framework.Framework):
         nodes_index = {}
         i = 0
         for user in self.G_comments.nodes():
-            node_dict = {'name':user.screen_name,'id':user.id,'group':self.users_group[user],
+            node_dict = {'name':user.screen_name,'id':user.id,'group':self.G_comments_di.nodes[user]['group'],
                          'degree': self.G_comments_di.nodes[user]['centrality'],
-                         'betweenness': 0.0, # Not yet implemented for multigraphs
-                         'eigenvector': 0.0 # Not yet implemented for multigraphs
+                         'betweenness': self.G_comments_di.nodes[user]['betweenness'],
+                         'eigenvector': self.G_comments_di.nodes[user]['eigenvector']
                          }
             nodes.append(node_dict)
             #Update with index
@@ -800,7 +899,7 @@ class SocialGraph(framework.Framework):
                              'post_id': users[2]['comment'].post.post_id,
                              'post_text': users[2]['comment'].post.text,
                              'comment': users[2]['comment'].text,
-                             'weight': 1}
+                             'weight':self.G_comments_di[users[0]][users[1]]['weight']}
             links.append(edge_dict)
 
         return (nodes,links)

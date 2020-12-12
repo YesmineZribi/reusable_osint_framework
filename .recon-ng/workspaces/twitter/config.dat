@@ -1,21 +1,24 @@
 {
     "twitter/twitter_user": {
-        "SOURCE": "@Jasmine52468952, @AsmaZribi1, @_anikesh_",
+        "SOURCE": "Jasmine52468952, AsmaZribi1",
         "SLEEP_TIME": 5,
         "SKIP_STATUS": true,
         "SOURCE_TYPE": "screen_name",
         "USER_INFO": false,
         "USER_FRIENDS": false,
         "USER_FAVORITES": false,
-        "ANALYSIS_RECON": false,
+        "ANALYSIS_RECON": true,
         "USER_RESHARES": true,
         "USER_MENTIONS": true,
-        "ENABLE_FETCH_ALL": true
+        "ENABLE_FETCH_ALL": false,
+        "USERS_LOOKUP": false,
+        "OPTIMIZE": true
     },
     "analysis/social_analysis": {
         "SOURCE_TYPE": "screen_name",
-        "USERNAMES": "@Jasmine52468952, @AsmaZribi1, @_anikesh_",
-        "FETCH_ACCOUNT_INFO": false
+        "USERNAMES": "@Jasmine52468952, @AsmaZribi1",
+        "FETCH_ACCOUNT_INFO": false,
+        "RELATIONSHIP_ANALYSIS": true
     },
     "visualization/graph_visualizer": {
         "PATH": "/home/osint/osint_framework/SNA_Analyser/twitter_user_jsons"

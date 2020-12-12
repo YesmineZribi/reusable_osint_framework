@@ -8,7 +8,7 @@
     "twitter/twitter_user": {
         "SCREEN_NAME": "twitterdev",
         "SOURCE_TYPE": "screen_name",
-        "SOURCE": "@Jasmine52468952",
+        "SOURCE": "LilSimSwapper, data6ase, keksploit, riuegod, widdlecatboy, TRDsec",
         "COUNT": 200,
         "USERNAME_OR_ID": "@AsmaZribi1,@CriticalRole",
         "USER_FAVORITES": true,
@@ -17,7 +17,9 @@
         "USER_FRIENDS": true,
         "USER_FOLLOWERS": true,
         "USER_TIMELINE": true,
-        "USER_INFO": true
+        "USER_INFO": true,
+        "ANALYSIS_RECON": true,
+        "OPTIMIZE": true
     },
     "twitter/twitter_tweet": {
         "TWEET_IDS": "1314575809722699776,1309191544549904384,1309191031288729602",
@@ -28,5 +30,11 @@
     },
     "base": {
         "VERBOSITY": 0
+    },
+    "analysis/social_analysis": {
+        "SOURCE_TYPE": "screen_name",
+        "USERNAMES": "LilSimSwapper, data6ase, keksploit, riuegod, widdlecatboy, TRDsec",
+        "FETCH_ACCOUNT_INFO": true,
+        "RECON_LEVEL": 1
     }
 }

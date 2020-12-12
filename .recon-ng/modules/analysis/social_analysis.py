@@ -21,7 +21,7 @@ class Module(BaseModule):
         'author': 'Yesmine Zribi (@YesmineZribi)',
         'version': '1.0',
         'description': 'Performs social network analysis',
-        'dependencies': ['NetworkX'],
+        'dependencies': ['NetworkX', 'python-louvain'],
         'files': [],
         'required_keys': [],
         'comments': (
@@ -42,7 +42,8 @@ class Module(BaseModule):
             ('comment_analysis',True,False,'Set to True to analyse user\'s post comment relationship'),
             ('save_graphs',True,False,'Saves the graphs to json files to be used by visualization module'),
             ('fetch_account_info',False,False,'Set to True to run recon'),
-            ('top',3,False,'Set to the number of prominent nodes to display, default 3, ie: will show top 3 hubs, top 3 brokers, etc.')
+            ('top',3,False,'Set to the number of prominent nodes to display, default 3, ie: will show top 3 hubs, top 3 brokers, etc.'),
+            ('recon_level',1,False,'Set to the level of recon to perform')
         ),
     }
 
@@ -63,8 +64,17 @@ class Module(BaseModule):
 
         # fetch data about all the users
         if self.options['fetch_account_info']:
+            # Keep track of list of users on who recon was done
+            # This is so we don't do recon on the same user twice
             self.debug("Performing recon...")
-            self.fetch_bulk_account_info()
+            # self.fetch_bulk_account_info(self.options['usernames'])
+            # Create user objects from usernames
+            users = []
+            for username in self.handles:
+                user = SocialUser(**{self.options['source_type']: username})
+                users.append(user)
+            self.fetch_bulk_account_recursive(users,stp_lvl=self.options['recon_level'])
+
             self.debug("Recon complete.")
 
         # Get all pair combinations from the list of users given - needed later
@@ -90,6 +100,8 @@ class Module(BaseModule):
 
         #Create graphs
         self.output("Creating graphs...")
+        # TODO: add user's friends to list in recursive
+        # TODO: feed list to SocialGraph
         self.graphs = SocialGraph(self.options['source_type'],self.handles)
 
         # Build result directory
@@ -121,7 +133,7 @@ class Module(BaseModule):
             # Get important metrics for graphs and store results in graph_report
             self.graph_structure_analysis(graph_name,graph_report)
             self.graph_node_analysis(graph_name,graph_report)
-            self.graph_cluster_analysis(graph_name,graph_report)
+            self.graph_community_analysis(graph_name, graph_report)
             self.generate_report(graph_report,dirname,filename)
 
         ############ TARGET USERS ANALYSIS #############################
@@ -140,7 +152,42 @@ class Module(BaseModule):
         self.output("Analysis COMPLETE.")
         self.output(f"results stored in {self.session_path}")
 
-    def fetch_bulk_account_info(self):
+    def get_usernames(self, users):
+        usernames = ""
+        for i, user in enumerate(users):
+            # Call right method to get username (screen_name/id) based on user choice
+            get_username = getattr(user,f"get_{self.options['source_type']}")
+            # Get the username and add it to the list
+            usernames += get_username()
+            if i < len(users)-1: # Still did not reach last element
+                usernames += ", "
+        return usernames
+
+    def fetch_bulk_account_recursive(self,users, stp_lvl=1, recur_lvl=0):
+
+        usernames = self.get_usernames(users)
+        # Do recon on the usernames
+        self.fetch_bulk_account_info(usernames)
+
+        # Increment recur_lvl
+        recur_lvl += 1
+        self.verbose(f" level {recur_lvl} of recon complete")
+        # Add to list to avoid fetching user info more than once
+        if recur_lvl < stp_lvl: # recon one more level
+            for user in users:
+                self.debug(f"Getting friends for {user}")
+                followers = user.get_followers()
+                friends = user.get_friends()
+                self.verbose("Sleeping for 1 minutes....")
+                time.sleep(1 * 60)
+                self.fetch_bulk_account_recursive(followers,stp_lvl,recur_lvl)
+                self.verbose("Sleeping for 1 minutes....")
+                time.sleep(1 * 60)
+                self.fetch_bulk_account_recursive(friends,stp_lvl,recur_lvl)
+
+    def fetch_bulk_account_info(self,usernames):
+        if not usernames:
+            return
         # Create temp file to store commands
         tmp_file = './cmds.txt'
         workspace = os.path.basename(os.path.normpath(self.workspace))
@@ -149,7 +196,8 @@ class Module(BaseModule):
             file.write(f"modules load {self.options['recon_module']}\n")
             file.write(f"options set analysis_recon TRUE\n")
             file.write(f"options set source_type {self.options['source_type']}\n")
-            file.write(f"options set source {self.options['usernames']}\n")
+            file.write(f"options set source {usernames}\n")
+            file.write(f"options set optimize True\n")
             file.write(f"run\n")
             file.write(f"exit\n")
 
@@ -158,6 +206,7 @@ class Module(BaseModule):
 
         #Delete file
         os.remove(tmp_file)
+
 
 ############################### ANALYSIS METHODS ####################################
     def single_user_analysis(self):
@@ -252,13 +301,15 @@ class Module(BaseModule):
         graph_report.set_influencers(self.graphs.get_top_nodes(graph_name, "eigenvector", self.options['top']))
         self.debug(f"Influencers: {graph_report.influencers}")
 
-    def graph_cluster_analysis(self,graph_name, graph_report):
-        pass
+    def graph_community_analysis(self, graph_name, graph_report):
+        #self.graphs.graph_modularity("connections")
+        num_of_communities = self.graphs.graph_best_partition(graph_name)
+        for i in range(0,num_of_communities):
+            community_metrics = self.graphs.get_community_metrics(graph_name,i,self.options['top'])
+            graph_report.add_community_metrics(community_metrics)
 
 ############################### ENDOF ANALYSIS METHODS ##############################
-############################### COMMUNITY DETECTION HELPERS #########################
 
-############################### ENDOF COMMUNITY DETECTION HELPERS ###################
 ################## RELATIONSHIP ANALYSIS HELPERS ####################################
     def connection_analysis(self,username1,username2,rel_obj):
         self.friendship_analysis(username1,username2,rel_obj)
@@ -285,7 +336,7 @@ class Module(BaseModule):
             rel_obj.set_common_connections(CommonConnections.COMMON_FRIENDS,common_friends)
         if common_followers:
             rel_obj.set_common_connections(CommonConnections.COMMON_FOLLOWERS,common_followers)
-
+# TODO: fix conn_path2 not being used
     def path_analysis(self,graph_name,username1,username2, rel_obj):
         conn_path = self.graphs.shortest_paths(graph_name,username1,username2)
         conn_path_2 = self.graphs.shortest_paths(graph_name,username2,username1)
@@ -465,9 +516,12 @@ class Module(BaseModule):
         PRIMARY KEY (username)
         ) 
         """)
+        # Delete any prior data
+        self.query(f"DELETE FROM targets")
 
     def add_graph(self, graph_name, graph_path):
         self.query(f"INSERT OR REPLACE INTO graphs(graph_name,graph_path) VALUES('{graph_name}','{graph_path}')")
 
     def add_target(self, username):
+        #Empty from any previous data
         self.query(f"INSERT OR REPLACE INTO targets(username) VALUES ('{username}')")

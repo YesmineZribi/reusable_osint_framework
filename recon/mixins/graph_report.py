@@ -19,7 +19,9 @@ class GraphReport(framework.Framework):
         self.influencers = {}
 
         # index = community number
-        # value = {} metrics for that community
+        # value (dict) = metrics for that community
+        # value = {metric: list of tuples} whehre each tuple
+        # is (node, its metric value)
         self.communities = []
 
     def set_density(self,density):
@@ -84,6 +86,30 @@ class GraphReport(framework.Framework):
 
         return string_rep
 
+    def community_format(self, community, index):
+        """
+        String formatter for an individual community
+        Args:
+            community (dict): community to format
+            keys = metric
+            Values = list of (node,metric)
+        Returns:
+            String representation of the community
+        """
+        string_rep = f"\tcommunity_{index}\n"
+
+        for metric, lst in community.items():
+            if metric == "centrality":
+                string_rep += "\t\tHubs: \n"
+            elif metric == "betweenness":
+                string_rep += "\t\tBrokers: \n"
+            elif metric == "eigenvector":
+                string_rep += "\t\tInfluencers: \n"
+            for node,value in lst:
+                string_rep += f"\t\t{node}: {value}\n"
+            string_rep += "\n"
+        return string_rep
+
     def communities_format(self):
         """
         String formatter for communities/clusters, shows
@@ -91,7 +117,13 @@ class GraphReport(framework.Framework):
         Returns:
             String format for graph communities metrics
         """
-        return ""
+        string_rep = "Graph communities:\n"
+        for i,community in enumerate(self.communities):
+            string_rep += self.community_format(community,i)
+            string_rep += "\n"
+
+        return string_rep
+
 
     def __repr__(self):
         string_rep = f"{self.graph_name} graph:\n"

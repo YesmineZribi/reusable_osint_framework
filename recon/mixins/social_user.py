@@ -1,12 +1,21 @@
 from recon.core import framework
 from recon.mixins.social_post import *
-from collections import defaultdict
+from typing import List
 
-import traceback
-
+"""
+Wrapper class for a social user, interacts with the database 
+to get info about the user: profile info, friends, followers,
+timeline, comments 
+"""
 class SocialUser(framework.Framework):
 
-    def __init__(self,screen_name=None, id=None):
+    def __init__(self,screen_name: str = None, id: int = None):
+        """
+        Representation of a social user
+        Args:
+            screen_name (str): screen name of this social user
+            id (int): id of this social user
+        """
         framework.Framework.__init__(self, 'social_user')
         #Get seed info about user
         self.id = id
@@ -17,17 +26,18 @@ class SocialUser(framework.Framework):
         #Clean up screen_name
         self.screen_name = self.screen_name[1:] if self.screen_name and self.screen_name.startswith('@') else self.screen_name
         #Initialize other variables
-        self.friends = [] #SocialUser[]
-        self.followers = [] #SocialUser[]
-        self.timeline = [] #SocialPost[]
-        self.favorites = [] #SocialPost[]
-        self.reshares = [] #Reshare[]
-        #self.mentions = defaultdict(list) #{SocialUser:Post[]}
-        self.mentions = [] #Mention[]
-        #Not yet implemented
-        self.comments = []
+        self.friends = [] # type: List['SocialUser']
+        self.followers = [] # type: List['SocialUser']
+        self.timeline = [] # type: List['SocialPost']
+        self.favorites = [] # type: List['SocialPost']
+        self.reshares = [] # type: List['Reshare']
+        self.mentions = [] # type: List['Mention']
+        self.comments = [] # type: List['Comment']
 
-    def get_all(self):
+    def get_all(self) -> None:
+        """
+        Retrievers all data about this social user
+        """
         self.get_id()
         self.get_friends()
         self.get_followers()
@@ -36,27 +46,42 @@ class SocialUser(framework.Framework):
         self.get_mentions()
         self.get_comments()
 
-    def get_id(self):
+    def get_id(self) -> int:
+        """
+        Getter for this social user's id
+        Returns:
+            id of this social user
+        """
         if self.id:
             return self.id
-        #Otherwise fetch from db
+        # Otherwise fetch from db
         response_list = self.query(f"SELECT id FROM users WHERE screen_name = \"{self.screen_name}\"")
         self.id = response_list[0][0]
         return self.id
 
-    def get_screen_name(self):
+    def get_screen_name(self) -> str:
+        """
+        Getter for this social user's screen name
+        Returns:
+            screen name of this social user
+        """
         if self.screen_name:
             return self.screen_name
-        #Otherwise fetch from db
+        # Otherwise fetch from db
         response_list = self.query(f"SELECT screen_name FROM users WHERE id = {self.id}")
         self.screen_name = response_list[0][0]
         return self.screen_name
 
-    def get_friends(self):
-        """Friends = users this user is following"""
+    def get_friends(self) -> List['SocialUser']:
+        """
+        Getter for this social user's friends
+        Friends = users this user is following
+        Returns:
+            List of social users
+        """
         if self.friends:
             return self.friends
-        #Otherwise fetch from db
+        # Otherwise fetch from db
         if not self.id:
             self.get_id()
 
@@ -67,21 +92,32 @@ class SocialUser(framework.Framework):
 
         return self.friends
 
-    def get_followers(self):
+    def get_followers(self) -> List['SocialUser']:
+        """
+        Getter for this social user's followers
+        Followers = users following this user
+        Returns:
+            List of social users
+        """
         if self.followers:
             return self.followers
-        #Otherwise fetch from db
+        # Otherwise fetch from db
         if not self.id:
             self.get_id()
 
         response_list = self.query(f"SELECT id,screen_name FROM users INNER JOIN followers ON users.id= followers.follower_id WHERE followers.user_id = {self.id}")
-        #Create users from each
+        # Create users from each
         for user_tup in response_list:
             self.followers.append(SocialUser(screen_name=user_tup[1],id=user_tup[0]))
 
         return self.followers
 
-    def get_timeline(self):
+    def get_timeline(self) -> List['SocialPost']:
+        """
+        Getter for this user's posts
+        Returns:
+            List of social posts
+        """
         if self.timeline:
             return self.timeline
         #Otherwise fetch from db
@@ -93,10 +129,15 @@ class SocialUser(framework.Framework):
             self.timeline.append(SocialPost(post_tup[0],post_tup[1],post_tup[2],post_tup[3]))
         return self.timeline
 
-    def get_favorites(self):
+    def get_favorites(self) -> List['SocialPost']:
+        """
+        Getter for posts liked by this user
+        Returns:
+            List of social posts
+        """
         if self.favorites:
             return self.favorites
-        #Otherwise fetch from db
+        # Otherwise fetch from db
         if not self.id:
             self.get_id()
 
@@ -113,7 +154,12 @@ class SocialUser(framework.Framework):
 
         return self.favorites
 
-    def get_reshares(self):
+    def get_reshares(self) -> List['Reshare']:
+        """
+        Getter for posts shared by this user
+        Returns:
+            List of social posts
+        """
         if self.reshares:
             return self.reshares
 
@@ -126,7 +172,7 @@ class SocialUser(framework.Framework):
         INNER JOIN reshares ON posts.id = reshares.post_id)
         INNER JOIN users ON posts.author_id = users.id)
         WHERE reshares.user_id = {self.id} 
-""")
+        """)
 
         for post_tup in response_list:
             original_post = SocialPost(post_id=post_tup[0],author=SocialUser(id=post_tup[1],screen_name=post_tup[2]),text=post_tup[3],created_at=post_tup[4])
@@ -140,7 +186,12 @@ class SocialUser(framework.Framework):
         return self.reshares
 
 
-    def get_mentions(self):
+    def get_mentions(self) -> List['Mention']:
+        """
+        Getter for posts in which this user mentions other users
+        Returns:
+            List of mentions
+        """
         if self.mentions:
             return self.mentions
 
@@ -164,7 +215,12 @@ class SocialUser(framework.Framework):
             self.mentions.append(Mention(self, mentioned_user,post))
         return self.mentions
 
-    def get_comments(self):
+    def get_comments(self) -> List['Comment']:
+        """
+        Getter for this user's comments
+        Returns:
+            List of comments
+        """
         if self.comments:
             return self.comments
 
@@ -193,13 +249,21 @@ class SocialUser(framework.Framework):
 
 
     def __eq__(self,user):
+        """
+        Override so we can compare users
+        """
         self.id = self.get_id() if not self.id else self.id
         user.id = user.get_id() if not user.id else user.id
         return isinstance(user, SocialUser) and self.id == user.id
 
     def __repr__(self):
+        """
+        Override for string representation of a social user
+        """
         return f"SocialUser({self.id},{self.screen_name})"
 
     def __hash__(self):
-        '''Overridden so we can use class as dict keys'''
+        """
+        Overridden so we can use class as dict keys
+        """
         return hash(self.id)
