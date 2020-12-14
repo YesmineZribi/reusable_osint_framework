@@ -6,16 +6,20 @@ import community as louvain_community
 
 import networkx as nx
 from operator import itemgetter
-
-import json
-import os
+from typing import List, Union, Tuple
 
 class SocialGraph(framework.Framework):
 
-    def __init__(self,source_type,usernames):
+    def __init__(self,source_type: str,usernames: list):
+        """
+        A Social graph instance
+        Args:
+            source_type (str): the type of usernames (ids or screen names)
+            usernames (list): list of usernames
+        """
         framework.Framework.__init__(self,'social_graph')
         self.source_type = source_type
-        #Initialize empty graphs
+        # Initialize empty graphs
         self.G_connections = nx.DiGraph()
         # Can have multiple edges between two nodes => if user shares multiple posts, mentions another user multiple times etc.
         self.G_reshares = nx.MultiDiGraph()
@@ -30,10 +34,10 @@ class SocialGraph(framework.Framework):
         self.G_mentions_di = nx.DiGraph()
         self.G_comments_di = nx.DiGraph()
 
-        #For each user create its object, call its get_all (multithread eventually)?
-        self.users = [] #SocialUser[]
+        # For each user create its object, call its get_all (multithread eventually)?
+        self.users = [] # type: List['SocialUser']
         # Useful mapping for efficient fetching
-        self.users_dict = {} #{screen_name: SocialUser}
+        self.users_dict = {} # {screen_name: SocialUser}
         # keep track of the number of communities per graph
         self.graph_community_len = {}
 
@@ -43,7 +47,7 @@ class SocialGraph(framework.Framework):
             self.users.append(user)
             self.users_dict[username] = user
 
-        #Create the graphs
+        # Create the graphs
 
         self.create_connections_graph()
         self.create_reshares_graph()
@@ -57,14 +61,19 @@ class SocialGraph(framework.Framework):
         self.create_mentions_di_graph()
         self.create_comments_di_graph()
 
-        #Extract all found users
+        # Extract all found users
         self.map_users()
 
         # Calculate metrics for graphs
         self.calculate_network_metrics()
 
 
-    def create_connections_graph(self):
+    def create_connections_graph(self) -> None:
+        """
+        Creates the connections digraph
+        Returns:
+            None
+        """
         self.debug("Generating connections graph for users...")
         for user in self.users:
             self.G_connections.add_node(user)
@@ -76,7 +85,12 @@ class SocialGraph(framework.Framework):
                 self.G_connections.add_edge(user,friend)
 
 
-    def create_reshares_graph(self):
+    def create_reshares_graph(self) -> None:
+        """
+        Creates the reshares multidigraph
+        Returns:
+            None
+        """
         self.debug("Generating reshares graph for users...")
         for user in self.users:
             # start by adding the user
@@ -86,7 +100,12 @@ class SocialGraph(framework.Framework):
                                          original_post=reshare.original_post,
                                          reshared_post=reshare.reshared_post)
 
-    def create_reshares_di_graph(self):
+    def create_reshares_di_graph(self) -> None:
+        """
+        Creates the reshares digraph equivalent
+        Returns:
+            None
+        """
         self.debug("Generating reshares di_graph...")
         for user in self.users:
             self.G_reshares_di.add_node(user)
@@ -102,7 +121,12 @@ class SocialGraph(framework.Framework):
                 else:
                     self.G_reshares_di.add_edge(source,target,reshares=[reshare],weight=1)
 
-    def create_favorites_graph(self):
+    def create_favorites_graph(self) -> None:
+        """
+        Creates the favorites multidigraph
+        Returns:
+            None
+        """
         self.verbose("Generating favorites graph for users...")
         for user in self.users:
             # Always add to graph first to account for
@@ -114,7 +138,12 @@ class SocialGraph(framework.Framework):
                 self.G_favorites.add_edge(user,favorite.author,favorite=favorite)
 
 
-    def create_favorties_di_graph(self):
+    def create_favorties_di_graph(self) -> None:
+        """
+        Creates the favorites digraph equivalent
+        Returns:
+            None
+        """
         self.debug("Generating favorites digraph...")
         for user in self.users:
             self.G_favorites_di.add_node(user)
@@ -131,7 +160,12 @@ class SocialGraph(framework.Framework):
                     self.G_favorites_di.add_edge(source,target,favorites=[favorite],weight=1)
 
 
-    def create_mentions_graph(self):
+    def create_mentions_graph(self) -> None:
+        """
+        Creates the mentions multidigraph
+        Returns:
+            None
+        """
         self.debug("Generating mentions graph for users...")
         for user in self.users:
             # Always add user first otherwise if user has no mentions
@@ -141,7 +175,10 @@ class SocialGraph(framework.Framework):
                 self.G_mentions.add_edge(user,mention.mentioned,post=mention.post)
 
 
-    def create_mentions_di_graph(self):
+    def create_mentions_di_graph(self) -> None:
+        """
+        Creates the mentions digraph equivalent
+        """
         self.debug("Generating mentions digraph...")
         for user in self.users:
             self.G_mentions_di.add_node(user)
@@ -157,7 +194,12 @@ class SocialGraph(framework.Framework):
                 else:
                     self.G_mentions_di.add_edge(source,target,mentions=[mention],weight=1)
 
-    def create_comments_graph(self):
+    def create_comments_graph(self) -> None:
+        """
+        Creates the comments multidigraph
+        Returns:
+            None
+        """
         self.debug("Generating comments graph for users...")
         for user in self.users:
             # Add user node to graph first and formore to ensure
@@ -167,7 +209,12 @@ class SocialGraph(framework.Framework):
                 post_author = comment.post.author
                 self.G_comments.add_edge(user,post_author,comment=comment)
 
-    def create_comments_di_graph(self):
+    def create_comments_di_graph(self) -> None:
+        """
+        Creates the comments digraph equivalent
+        Returns:
+            None
+        """
         self.debug("Generating comments digraph...")
         for user in self.users:
             self.G_comments_di.add_node(user)
@@ -183,25 +230,65 @@ class SocialGraph(framework.Framework):
                     self.G_comments_di[source][target].add_edge(source,target,comments=[comment],weight=1)
 
 ############################# GRAPH GETTERS ########################################################
-    def get_graph(self,graph_name):
+    def get_graph(self,graph_name: str) -> Union['DiGraph','MultiDiGraph']:
+        """
+        Getter for graphs based on their name
+        Args:
+            graph_name (str): name of the graph to get
+        Returns:
+            A networkX DiGraph or MultiDiGraph with the name graph_name
+        """
         graph = getattr(self,f'G_{graph_name}')
         return graph
 
-    def get_di_graph(self,graph_name):
+    def get_di_graph(self,graph_name: str) -> Union['DiGraph']:
+        """
+        Getter for digraph equivalent of graph with the name graph_name
+        Args:
+            graph_name (str): name of the graph to get
+        Returns:
+            A networkX DiGraph with the name graph_name
+        """
         if graph_name in 'connections':
             return self.G_connections
         return getattr(self,f'G_{graph_name}_di')
 
-    def get_node(self,username):
+    def get_node(self,username: str) -> 'SocialUser':
+        """
+        Getter for a node with the username username
+        Note: username type is based on source_type
+        Args:
+            username (str): username of the user node to get
+        Returns:
+            Social user in the graph with username username
+        """
         return self.users_dict[username]
 
-    def get_edges(self,graph_name, username1,username2):
+    def get_edges(self,graph_name: str, username1: str,username2: str) -> dict:
+        """
+        Gets all edges between username1 and username2 in graph with name graph_name
+        Args:
+            graph_name (str): the name of the graph to get
+            username1 (str): username of user1
+            username2 (str): username of user2
+        Returns:
+            Dict of tuples representing edges (source,target,attributes)
+        """
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
         graph = self.get_graph(graph_name)
         return graph[user1][user2]
 
-    def get_edges_attr(self,graph_name,username1,username2):
+    def get_edges_attr(self,graph_name: str,username1: str,username2: str) -> dict:
+        """
+        Gets all edge attributes between username1 and username2 in graph with name graph_name
+        Args:
+            graph_name (str): the name of the graph to get
+            username1 (str): username of user1
+            username2 (str): username of user2
+        Returns:
+            Dict of edge attributes
+        """
         user1 = self.users_dict[username1] if not isinstance(username1, SocialUser) else username1
         user2 = self.users_dict[username2] if not isinstance(username2, SocialUser) else username2
         graph = self.get_graph(graph_name)
@@ -217,7 +304,12 @@ class SocialGraph(framework.Framework):
 
 ############################# ENDOF GETTERS ########################################################
 ############################ NODE RELATIONSHIP ANALYSIS #############################################
-    def follows(self,username1,username2):
+    def follows(self,username1: str,username2: str) -> bool:
+        """
+        Checks if username1 follows username2
+        Returns:
+            True if username1 follows username2 and false otherwise
+        """
         if nx.is_empty(self.G_connections):
             return False
 
@@ -233,7 +325,13 @@ class SocialGraph(framework.Framework):
             return False
 
 
-    def reshared(self,username1,username2):
+    def reshared(self,username1: str,username2: str):
+        """
+        Checks if username1 shared a post by username2
+        Returns:
+            tuple(bool,(original_post,reshared_post)) where bool = True if username shared at least one post from username2
+            and False otherwise
+        """
         if nx.is_empty(self.G_reshares):
             return False
 
@@ -254,13 +352,15 @@ class SocialGraph(framework.Framework):
         for key,edge_attr in reshare_edges.items():
             posts.append((edge_attr['original_post'],edge_attr['reshared_post']))
 
-        # original_post = self.G_reshares[user1][user2]['original_post']
-        # reshared_post = self.G_reshares[user1][user2]['reshared_post']
-        # return (reshared,original_post,reshared_post)
         return (reshared,posts)
 
 
-    def favored(self,username1,username2):
+    def favored(self,username1: str,username2: str) -> Union[List['SocialPost'],bool]:
+        """
+        Checks if username1 liked a post by username2
+        Returns:
+            Lists of posts authored by username2 and liked by username1 and False otherwise
+        """
         if nx.is_empty(self.G_favorites):
             return False
 
@@ -284,7 +384,12 @@ class SocialGraph(framework.Framework):
 
         return favored_posts
 
-    def mentioned(self,username1,username2):
+    def mentioned(self,username1: str,username2: str) -> Union[List['Mention'],bool]:
+        """
+        Checks if username1 liked mentioned username2 in a post
+        Returns:
+            List of mentions of username2 by username1 and False otherwise
+        """
         if nx.is_empty(self.G_mentions):
             return False
 
@@ -301,14 +406,19 @@ class SocialGraph(framework.Framework):
             # indirect reshare
             return False
 
-        #Collect all posts in which user1 mentions user2
+        # Collect all posts in which user1 mentions user2
         mentioned_posts = []
         mentioned_edges = self.G_mentions[user1][user2]
         for key,edge_attr in mentioned_edges.items():
             mentioned_posts.append(edge_attr['post'])
         return mentioned_posts
 
-    def commented(self,username1,username2):
+    def commented(self,username1: str,username2: str) -> Union[List['Comment'],bool]:
+        """
+        Checks if username1 commented on a post by username2
+        Returns:
+            List of Comments of username1 on posts by username2 and False otherwise
+        """
         if nx.is_empty(self.G_comments):
             return False
 
@@ -324,7 +434,7 @@ class SocialGraph(framework.Framework):
             # indirect reshare
             return False
 
-        #Collect all posts in which user1 commented on post from user2
+        # Collect all posts in which user1 commented on post from user2
         commented_posts = []
         commented_edges = self.G_comments[user1][user2]
         for key,edge_attr in commented_edges.items():
@@ -332,13 +442,23 @@ class SocialGraph(framework.Framework):
 
         return commented_posts
 
-    def common_friends(self,username1,username2):
+    def common_friends(self,username1: str,username2: str) -> Union[List['SocialUser'],bool]:
+        """
+        Checks if username1 and username have a common friend
+        Returns:
+            List of common friends if username1 and username have any and False otherwise
+        """
         if nx.is_empty(self.G_connections):
             return []
         return self.common_out_neighbours(self.G_connections,username1,username2)
 
 
-    def common_followers(self,username1,username2):
+    def common_followers(self,username1: str,username2: str) -> Union[List['SocialUser'], bool]:
+        """
+        Checks if username1 and username have a common followers
+        Returns:
+            List of common followers if username1 and username have any and False otherwise
+        """
         if nx.is_empty(self.G_connections):
             return []
         return self.common_in_neighbours(self.G_connections,username1,username2)
@@ -370,7 +490,12 @@ class SocialGraph(framework.Framework):
         return self.common_out_neighbours(self.G_comments,username1,username2)
 
 
-    def get_all_reshares_from_src(self,username,src):
+    def get_all_reshares_from_src(self,username: str,src: str) -> List['Reshare']:
+        """
+        Gets all posts that username shared from src
+        Returns:
+            List of Reshares
+        """
         user = self.users_dict[username] if not isinstance(username,SocialUser) else username
         src = self.users_dict[src] if not isinstance(src,SocialUser) else src
         # Get all edges from user to src in reshares graph
@@ -381,9 +506,11 @@ class SocialGraph(framework.Framework):
         return reshares
 
 
-    def get_all_mentions_of_src(self,username,src):
+    def get_all_mentions_of_src(self,username: str,src: str) -> Union[List['Mention'],bool]:
         """
-        Get all posts in which username mentions src
+        Gets all posts in which username mentions src
+        Returns:
+            List of Mentions
         """
         user = self.users_dict[username] if not isinstance(username, SocialUser) else username
         src = self.users_dict[src] if not isinstance(src,SocialUser) else src
@@ -394,7 +521,12 @@ class SocialGraph(framework.Framework):
             mentions.append(Mention(user,src,post=attrs['post']))
         return mentions
 
-    def get_all_favorites_from_src(self,username,src):
+    def get_all_favorites_from_src(self,username: str,src: str) -> Union[List['Favorite'],bool]:
+        """
+        Gets all posts by src that username liked
+        Returns:
+            List of Favorites
+        """
         user = self.users_dict[username] if not isinstance(username, SocialUser) else username
         src = self.users_dict[src] if not isinstance(src,SocialUser) else src
         # Get all edges from user to src
@@ -404,7 +536,12 @@ class SocialGraph(framework.Framework):
             favorites.append(Favorite(user,src,post=attrs['favorite']))
         return favorites
 
-    def get_all_comments_from_src(self,username,src):
+    def get_all_comments_from_src(self,username: str,src: str) -> Union[List['Comment'],bool]:
+        """
+        Gets all comments of username on posts by src
+        Returns:
+            List of Comments
+        """
         user = self.users_dict[username] if not isinstance(username, SocialUser) else username
         src = self.users_dict[src] if not isinstance(src,SocialUser) else src
         # Get all edges from user to src
@@ -450,12 +587,26 @@ class SocialGraph(framework.Framework):
 ############################ ENDOF NODE RELATIONSHIP ANALYSIS #####################################
 ############################ GRAPH STRUCTURE METRICS ##############################################
 
-    def density(self,graph_name):
+    def density(self,graph_name: str) -> float:
+        """
+        Calculates density of graph with graph_name
+        Args:
+            graph_name(str): name of the graph for which to calculate density
+        Returns:
+            density of graph
+        """
         graph = self.get_di_graph(graph_name)
         return nx.density(graph)
 
 
-    def triadic_closure(self,graph_name):
+    def triadic_closure(self,graph_name: str) -> float:
+        """
+        Calculates triadic closure of graph with graph_name
+        Args:
+            graph_name(str): name of the graph for which to calculate density
+        Returns:
+            triadic closure of graph
+        """
         graph = self.get_di_graph(graph_name)
         return nx.transitivity(graph)
 
@@ -517,13 +668,14 @@ class SocialGraph(framework.Framework):
             graph.nodes[ix]['closeness'] = clos
 
 
-    def get_closeness(self, graph_name, username):
+    def get_closeness(self, graph_name: str, username: str) -> float:
         """
-        Scores each node based on their 'closeness' to all other nodes
-        in the network. Useful for finding individuals best placed to influence
-        the entire network most quickly. Can be similar for a highly connected
-        network at which point could be useful to look into Closeness in a single
-        cluster
+         Gets the centrality of node with screen name or id username in graph_name
+         Args:
+             graph_name (str): name of the graph from which to get the metric
+             username (str): id or screen name of the target user
+        Returns:
+          centrality degree for username
         """
         user = self.users_dict[username] if not isinstance(username,SocialUser) else username
         graph = self.get_di_graph(graph_name)
@@ -541,15 +693,14 @@ class SocialGraph(framework.Framework):
         for ix,btwn in graph_betweenness.items():
             graph.nodes[ix]['betweenness'] = btwn
 
-    def get_betweenness_centrality(self, graph_name, username):
+    def get_betweenness_centrality(self, graph_name: str, username: str) -> float:
         """
-        Measures the number of times a node lies on the shortest path between
-        other nodes. This shows which ndoes are 'bridges' between nodes in
-        a network. Useful for finding individuals who influence the flow around a
-        system and for analyzing communication dynamics, should be used with case,
-        a high betweeness count could indicate somoene holds authority over disparate
-        clusters in a network, or just that they are on the periphery of both
-        clusters
+         Gets the betweenness centrality of node with screen name or id username in graph_name
+         Args:
+             graph_name (str): name of the graph from which to get the metric
+             username (str): id or screen name of the target user
+        Returns:
+          betweenness centrality for username
         """
         user = self.users_dict[username] if username and not isinstance(username,SocialUser) else username
         graph = self.get_di_graph(graph_name)
@@ -565,10 +716,14 @@ class SocialGraph(framework.Framework):
         for ix, eig in graph_eigen.items():
             graph.nodes[ix]['eigenvector'] = eig
 
-    def get_eigenvector_centrality(self, graph_name, username):
+    def get_eigenvector_centrality(self, graph_name: str, username: str) -> float:
         """
-        This measure can identify nodes with influence over the whole
-        network not just those directly connected to it.
+         Gets the eigenvector centrality of node with screen name or id username in graph_name
+         Args:
+             graph_name (str): name of the graph from which to get the metric
+             username (str): id or screen name of the target user
+        Returns:
+          eigenvector centrality for username
         """
         user = self.users_dict[username] if not isinstance(username,SocialUser) else username
         graph = self.get_di_graph(graph_name)
@@ -589,11 +744,11 @@ class SocialGraph(framework.Framework):
     def get_metric_attributes(self):
         return ['centrality', 'betweenness', 'eigenvector']
     
-    def get_top_nodes(self,graph_name,metric="centrality", top=1):
+    def get_top_nodes(self,graph_name: str,metric: str ="centrality", top: int =1) -> dict:
         """
         Args:
             graph_name (str): name of graph
-            metric: 'centrality', 'betweenness', or 'eigenvector'
+            metric (str): 'centrality', 'betweenness', or 'eigenvector'
             top (int): number of hubs to return
             ie: top = 3: returns top 3 hubs or brokers or influencers
         Returns:
@@ -626,12 +781,12 @@ class SocialGraph(framework.Framework):
 
 ########################### ENDOF NETWORK METRICS ###############################################
 ########################### CLUSTERING NETWORK METHODS ##########################################
-    def graph_modularity(self,graph_name):
+    def graph_modularity(self,graph_name: str) -> int:
         """
         Community detection using modularity, sets the
         community/group # as node attribute
         Args:
-            graph_name -> str: name of the graph
+            graph_name (str): name of the graph
         Returns:
             Number of communities found
         """
@@ -657,11 +812,11 @@ class SocialGraph(framework.Framework):
         # Return number of communities
         return self.graph_community_len[graph_name]
 
-    def graph_best_partition(self,graph_name):
+    def graph_best_partition(self,graph_name: str) -> int:
         """
         Community detection using louvain algorithm
         Args:
-            graph_name -> str: name of the graph
+            graph_name (str): name of the graph
         Returns:
             None
         """
@@ -677,7 +832,7 @@ class SocialGraph(framework.Framework):
         # Return number of communities
         return self.graph_community_len[graph_name]
 
-    def get_community_metrics(self,graph_name, index=0,top=1):
+    def get_community_metrics(self,graph_name: str, index: int = 0,top: int = 1) -> dict:
         """
         Returns metrics for the community labelled with index
         Args:
@@ -718,9 +873,13 @@ class SocialGraph(framework.Framework):
 ########################### ENDOF CLUSTERING NETWORK METHODS ####################################
 ########################### NETWORK EXPORT METHDOS ###############################################
 
-    def export_graph(self,graph_name):
+    def export_graph(self,graph_name: str) -> tuple:
         """
-        Save the graph to a json file
+        Exports graph into a list of nodes and edges
+        Args:
+            graph_name (str): name of graph to export
+        Returns:
+            Tuple with list of nodes and list of links (nodes,links(
         """
         # pos = nx.spring_layout(graph)
         # nx.draw_networkx(graph, pos)

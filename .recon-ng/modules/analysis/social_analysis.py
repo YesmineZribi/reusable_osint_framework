@@ -13,6 +13,8 @@ import sys
 import time
 from datetime import datetime
 import json
+import re
+import multiprocessing as mp
 
 class Module(BaseModule):
 
@@ -34,7 +36,8 @@ class Module(BaseModule):
             ('recon_module','twitter_user',True,'Set to the name of the recon module to use (must already be installed)'),
             ('generate_report',True,True,'Set to True to generate reports'),
             ('user_analysis', True,False,'Set to True to get user metrics'),
-            ('relationship_analysis', True,False,'Set to True to get user metrics'),
+            ('relationship_analysis', True,False,'Set to get pairwise user relationship analysis'),
+            ('common_analysis', True,False,'Set to get reports about relevant users in this network'),
             ('connection_analysis',True,False,'Set to True to analyse user connections'),
             ('reshare_analysis',True,False,'Set to True to analyse user\'s post sharing relationship'),
             ('mention_analysis',True,False,'Set to True to analyse users\' mentions relationship'),
@@ -43,7 +46,9 @@ class Module(BaseModule):
             ('save_graphs',True,False,'Saves the graphs to json files to be used by visualization module'),
             ('fetch_account_info',False,False,'Set to True to run recon'),
             ('top',3,False,'Set to the number of prominent nodes to display, default 3, ie: will show top 3 hubs, top 3 brokers, etc.'),
-            ('recon_level',1,False,'Set to the level of recon to perform')
+            ('recon_level',1,False,'Set to the level of recon to perform'),
+            ('keywords','',False,'Set to keywords to look for in user posts'),
+            ('order_by','followers',False,'Order users by highest number of target followers/friends/mentions/reshares'),
         ),
     }
 
@@ -57,24 +62,26 @@ class Module(BaseModule):
         if self.options['source_type'] in 'id' and not(all(x.isnumeric() for x in self.options['usernames'].split(","))):
             self.error('Illegal values for social network ids')
 
+        if self.options['keywords']:
+            self.keywords = [keyword for keyword in self.options['keywords'].split(',')]
+
         # Split them and convert to ints if necessary or remove the @
         self.handles = [username.strip() for username in self.options['usernames'].split(",")] if not isinstance(self.options['usernames'],int) else [str(self.options['usernames'])]
         self.handles = [int(x) for x in self.handles] if all(x.isnumeric() for x in self.handles) else self.handles
         self.handles = [handle[1:] if handle.startswith('@') else handle for handle in self.handles] if all(isinstance(x,str) for x in self.handles) else self.handles # Clean up the handles
+
+        # Create user objects from usernames
+        self.users = []
+        for username in self.handles:
+            user = SocialUser(**{self.options['source_type']: username})
+            self.users.append(user)
 
         # fetch data about all the users
         if self.options['fetch_account_info']:
             # Keep track of list of users on who recon was done
             # This is so we don't do recon on the same user twice
             self.debug("Performing recon...")
-            # self.fetch_bulk_account_info(self.options['usernames'])
-            # Create user objects from usernames
-            users = []
-            for username in self.handles:
-                user = SocialUser(**{self.options['source_type']: username})
-                users.append(user)
-            self.fetch_bulk_account_recursive(users,stp_lvl=self.options['recon_level'])
-
+            self.fetch_bulk_account_info(self.options['usernames'])
             self.debug("Recon complete.")
 
         # Get all pair combinations from the list of users given - needed later
@@ -100,8 +107,7 @@ class Module(BaseModule):
 
         #Create graphs
         self.output("Creating graphs...")
-        # TODO: add user's friends to list in recursive
-        # TODO: feed list to SocialGraph
+        # TODO: add friends/followers if recursive
         self.graphs = SocialGraph(self.options['source_type'],self.handles)
 
         # Build result directory
@@ -124,6 +130,13 @@ class Module(BaseModule):
         self.create_targets_schema()
         self.debug("Building reports schema...")
 
+        # Keep track of all common friends/followers/mentions etc.
+        # used to identify users followed/following the most by the target users
+        self.commons = set()
+
+        # Keep track of pair reports
+        self.pair_reports = []
+
     def module_run(self):
         self.output("Initiating analysis...")
         dirname = f"{self.options['recon_module']}_network_reports"
@@ -142,7 +155,10 @@ class Module(BaseModule):
             self.single_user_analysis()
         ############### RELATIONSHIP ANALYSIS #####################
         if self.options['relationship_analysis']:
-            self.relationship_analysis()
+            self.relationship_pair_analysis()
+
+        if self.options['common_analysis']:
+            self.network_relationship_analysis()
 
         if self.options['save_graphs']:
             self.output("Exporting graphs...")
@@ -163,8 +179,8 @@ class Module(BaseModule):
                 usernames += ", "
         return usernames
 
+    # TODO: Implement recursive fetching
     def fetch_bulk_account_recursive(self,users, stp_lvl=1, recur_lvl=0):
-
         usernames = self.get_usernames(users)
         # Do recon on the usernames
         self.fetch_bulk_account_info(usernames)
@@ -225,14 +241,14 @@ class Module(BaseModule):
             # Get node to display in report
             user_obj = self.graphs.get_node(handle)
             # Store in user report
-            user_report = UserReport(user_obj, metrics)
+            user_report = UserReport(user_obj, measures=metrics)
             self.user_reports[handle] = user_report  # Store measures for that user
             filename = f"{handle}_report"
             self.generate_report(user_report,dirname,filename)
         self.debug("User analysis complete.")
         self.debug("Generating user reports...")
 
-    def relationship_analysis(self):
+    def relationship_pair_analysis(self):
         # directory under which to save relationship reports
         dirname = f"{self.options['recon_module']}_relationship_reports"
         # Iterate over each pair of users and analyse relationship
@@ -248,28 +264,28 @@ class Module(BaseModule):
                 self.debug("Started connection analysis...")
                 rel_obj.enable_connection_analysis()
                 # Connections analysis
-                self.connection_analysis(username1,username2,rel_obj)
+                self.connection_pair_analysis(username1, username2, rel_obj)
                 self.debug("Connection analysis complete.")
             if self.options['reshare_analysis']:
                 self.debug("Started reshare analysis...")
                 rel_obj.enable_reshare_analysis()
-                self.reshare_analysis(username1,username2,rel_obj)
+                self.reshare_pair_analysis(username1, username2, rel_obj)
                 self.debug("Reshare analysis complete.")
             if self.options['mention_analysis']:
                 self.debug("Started mention analysis...")
                 rel_obj.enable_mention_analysis()
-                self.mention_analysis(username1,username2,rel_obj)
+                self.mention_pair_analysis(username1, username2, rel_obj)
                 self.debug("mention analysis complete")
 
             if self.options['favorite_analysis']:
                 self.debug("Started favorite analysis...")
                 rel_obj.enable_favorite_analysis()
-                self.favorite_analysis(username1,username2,rel_obj)
+                self.favorite_pair_analysis(username1, username2, rel_obj)
                 self.debug("favorite analysis complete.")
             if self.options['comment_analysis']:
                 self.debug("Started comment analysis...")
                 rel_obj.enable_comment_analysis()
-                self.comment_analysis(username1,username2,rel_obj)
+                self.comment_pair_analysis(username1, username2, rel_obj)
                 self.debug("Comment analysis complete.")
 
             self.output("Generating report...")
@@ -278,7 +294,33 @@ class Module(BaseModule):
             self.generate_report(rel_obj,dirname,filename)
             self.debug(f"Finished generating reports for pair {pair}.")
             # print summary
+            self.pair_reports.append(rel_obj)
             rel_obj.print_summary()
+
+    def network_relationship_analysis(self):
+        user_reports = []
+        for user in self.commons:
+            user_report = self.get_user_report(user)
+            user_reports.append(user_report)
+
+        # Order based on user input
+        if self.options['order_by'] == "followers":
+            user_reports.sort(key=lambda x: x.target_followers_num(), reverse=True)
+
+        elif self.options['order_by'] == "friends":
+            user_reports.sort(key=lambda x: x.target_friends_num(), reverse=True)
+
+        elif self.options['order_by'] == "mentions":
+            user_reports.sort(key=lambda x: x.target_mentions_num(), reverse=True)
+
+        elif self.options['order_by'] == "reshares":
+            user_reports.sort(key=lambda x: x.target_reshares_num(), reverse=True)
+
+        dirname = f"{self.options['recon_module']}_common_users_reports"
+        filename = "relevant_network_users"
+        self.generate_common_reports(user_reports,dirname,filename)
+        return user_reports
+
 
     def graph_structure_analysis(self,graph_name, graph_report):
         # Get density of the graph
@@ -311,12 +353,135 @@ class Module(BaseModule):
 ############################### ENDOF ANALYSIS METHODS ##############################
 
 ################## RELATIONSHIP ANALYSIS HELPERS ####################################
-    def connection_analysis(self,username1,username2,rel_obj):
-        self.friendship_analysis(username1,username2,rel_obj)
-        self.commons_conn_analysis(username1, username2, rel_obj)
-        self.path_analysis("connections", username1, username2, rel_obj)
 
-    def friendship_analysis(self,username1,username2,rel_obj):
+    def get_user_report(self,user):
+        user.enable_fetch("twitter_user")
+        # Get target users this user follows
+        target_friends = self.get_target_friends(user)
+        # Get target users that follow this user
+        target_followers = self.get_target_followers(user)
+        # Get target users that mentioned this user
+        # mentions_by_targets = self.get_mentions_by_targets(user)
+        # # Get target users mentioned by this user
+        # target_mentions = self.get_target_mentions(user)
+        # # Get target users that shared posts from this user
+        # reshares_by_targets = self.get_reshares_by_targets(user)
+        # # Get target users whose posts this user shared
+        # target_reshares = self.get_target_reshares(user)
+        # Get critical posts
+        if self.options['keywords']:
+            critical_posts = self.search_user_posts(user, self.keywords)
+        else:
+            critical_posts = []
+
+        user_report = UserReport(user, target_friends=target_friends,
+                                 target_followers=target_followers,
+                                 # mentions_by_targets=mentions_by_targets,
+                                 # target_mentions=target_mentions,
+                                 # reshares_by_targets=reshares_by_targets,
+                                 # target_reshares=target_reshares,
+                                 critical_posts=critical_posts
+                                 )
+
+
+        return user_report
+
+
+    def get_target_friends(self,user):
+        """
+        Target users this user is following
+        """
+        friends = []
+        for target in self.users:
+            if target.has_follower(user):
+                friends.append(target)
+        return friends
+
+    def get_target_followers(self,user):
+        """
+        Target user that follow this user
+        """
+        followers = []
+        for target in self.users:
+            if target.has_friend(user):
+                followers.append(target)
+        return followers
+
+
+    def get_mentions_by_targets(self,user):
+        """
+        Get target users that mentioned this user
+        """
+        # Get all target users that mentioned this user
+        mentions_by_targets = {}
+        for target in self.users:
+            mentioned = target.mentioned(user)
+            if mentioned:
+                mentions_by_targets[target] = mentioned
+
+        return mentions_by_targets
+
+    def get_target_mentions(self,user):
+        """
+        Get target users this user mentioned
+        """
+        target_mentions = {}
+        for target in self.users:
+            mentioned = user.mentioned(target)
+            if mentioned:
+                target_mentions[target] = mentioned
+        return target_mentions
+
+    def get_reshares_by_targets(self,user):
+        """
+        Get target users that shared posts from this user
+        """
+        # Get all target users that mentioned this user
+        reshares_by_targets = {}
+        for target in self.users:
+            reshared = target.reshared(user)
+            if reshared:
+                reshares_by_targets[target] = reshared
+        return reshares_by_targets
+
+    def get_target_reshares(self,user):
+        """
+        Get target users from which this user reshared posts
+        """
+        target_reshares = {}
+        for target in self.users:
+            reshared = user.reshared(target)
+            if reshared:
+                target_reshares[target] = reshared
+        return target_reshares
+
+    def search_user_posts(self,user,keywords):
+        """
+        Search all user posts that contains any of the strings in keywords
+        """
+        def find_whole_word(w):
+            return re.compile(r'\b({0})\b'.format(w), flags=re.IGNORECASE).search
+
+        found_posts = []
+        user_posts = user.get_timeline()
+        for post in user_posts:
+            if any(find_whole_word(keyword)(post.text) for keyword in keywords):
+                found_posts.append(post.text)
+
+        return found_posts
+
+
+
+
+################## ENDOF RELATIONSHIP PAIR ANALYSIS HELPERS ##########################
+
+################## RELATIONSHIP PAIR ANALYSIS HELPERS ################################
+    def connection_pair_analysis(self, username1, username2, rel_obj):
+        self.friendship_pair_analysis(username1, username2, rel_obj)
+        self.commons_conn_pair_analysis(username1, username2, rel_obj)
+        self.path_pair_analysis("connections", username1, username2, rel_obj)
+
+    def friendship_pair_analysis(self, username1, username2, rel_obj):
         u1_follows_u2 = self.graphs.follows(username1, username2)
         u2_follows_u1 = self.graphs.follows(username2, username1)
         if u1_follows_u2 and u2_follows_u1:
@@ -329,26 +494,36 @@ class Module(BaseModule):
         else:
             rel_obj.set_connection(Connection.NONE)
 
-    def commons_conn_analysis(self,username1,username2,rel_obj):
+    def commons_conn_pair_analysis(self, username1, username2, rel_obj):
         common_friends = self.graphs.common_friends(username1,username2)
         common_followers = self.graphs.common_followers(username1,username2)
         if common_friends:
+
+            for friend in common_friends:
+                self.commons.add(friend)
+
             rel_obj.set_common_connections(CommonConnections.COMMON_FRIENDS,common_friends)
+
         if common_followers:
+
+            for follower in common_followers:
+                self.commons.add(follower)
+
             rel_obj.set_common_connections(CommonConnections.COMMON_FOLLOWERS,common_followers)
+
 # TODO: fix conn_path2 not being used
-    def path_analysis(self,graph_name,username1,username2, rel_obj):
+    def path_pair_analysis(self, graph_name, username1, username2, rel_obj):
         conn_path = self.graphs.shortest_paths(graph_name,username1,username2)
         conn_path_2 = self.graphs.shortest_paths(graph_name,username2,username1)
         rel_obj.set_connection_path(conn_path)
 
-    def reshare_analysis(self,username1,username2,rel_obj):
+    def reshare_pair_analysis(self, username1, username2, rel_obj):
         # Get posts that u1 shares from u2 and vice versa
-        self.direct_reshare(username1,username2,rel_obj)
+        self.direct_pair_reshare(username1, username2, rel_obj)
         # Get posts u1 and u2 shared from the same source
-        self.common_source_reshare(username1,username2,rel_obj)
+        self.common_source_pair_reshare(username1, username2, rel_obj)
 
-    def direct_reshare(self,username1,username2,rel_obj):
+    def direct_pair_reshare(self, username1, username2, rel_obj):
         u1_reshared_u2 = self.graphs.reshared(username1,username2)
         u2_reshared_u1 = self.graphs.reshared(username2,username1)
         if u1_reshared_u2:
@@ -359,7 +534,7 @@ class Module(BaseModule):
             posts = u2_reshared_u1[1]
             rel_obj.set_reshare(username2,username1,posts)
 
-    def common_source_reshare(self,username1,username2,rel_obj):
+    def common_source_pair_reshare(self, username1, username2, rel_obj):
         """
         Gets user reshared by both username1 and username2 along
         with all posts username1 reshared from this user and all
@@ -372,18 +547,20 @@ class Module(BaseModule):
 
         for user in users:
             for src in common_src:
-                #For each user, get the posts user shared from src
+                # For each user, get the posts user shared from src
                 reshares = self.graphs.get_all_reshares_from_src(user,src)
-                #Save this to report class
+
+                #self.commons.add(src)
+                # Save this to report class
                 rel_obj.set_common_src_reshares(user,src,reshares)
 
-    def mention_analysis(self,username1,username2,rel_obj):
+    def mention_pair_analysis(self, username1, username2, rel_obj):
         # Get posts in which u1 mentions u2 and vice versa
-        self.direct_mention(username1,username2,rel_obj)
+        self.direct_pair_mention(username1, username2, rel_obj)
         # Get posts where u1 and u2 mention the same user
-        self.common_source_mention(username1,username2,rel_obj)
+        self.common_source_pair_mention(username1, username2, rel_obj)
 
-    def direct_mention(self,username1,username2,rel_obj):
+    def direct_pair_mention(self, username1, username2, rel_obj):
         u1_mentioned_u2 = self.graphs.mentioned(username1,username2)
         u2_mentioned_u1 = self.graphs.mentioned(username2,username1)
         if u1_mentioned_u2:
@@ -394,7 +571,7 @@ class Module(BaseModule):
             posts = u2_mentioned_u1
             rel_obj.set_mention(username2,username1,posts)
 
-    def common_source_mention(self,username1,username2,rel_obj):
+    def common_source_pair_mention(self, username1, username2, rel_obj):
         common_src = self.graphs.common_mentions_nodes(username1,username2)
         # Get the nodes for each user
         users = [self.graphs.get_node(username1),self.graphs.get_node(username2)]
@@ -403,13 +580,14 @@ class Module(BaseModule):
             for src in common_src:
                 #For each user, get the posts user shared from src
                 mentions = self.graphs.get_all_mentions_of_src(user,src)
+                #self.commons.add(src)
                 rel_obj.set_common_src_mentions(user,src,mentions)
 
-    def favorite_analysis(self,username1,username2,rel_obj):
-        self.direct_favorite(username1,username2,rel_obj)
-        self.common_source_favorite(username1,username2,rel_obj)
+    def favorite_pair_analysis(self, username1, username2, rel_obj):
+        self.direct_pair_favorite(username1, username2, rel_obj)
+        self.common_source_pair_favorite(username1, username2, rel_obj)
 
-    def direct_favorite(self,username1,username2,rel_obj):
+    def direct_pair_favorite(self, username1, username2, rel_obj):
         u1_liked_u2 = self.graphs.favored(username1,username2)
         u2_liked_u1 = self.graphs.favored(username2,username1)
 
@@ -420,7 +598,7 @@ class Module(BaseModule):
             posts = u2_liked_u1
             rel_obj.set_favorite(username2,username1,posts)
 
-    def common_source_favorite(self,username1,username2,rel_obj):
+    def common_source_pair_favorite(self, username1, username2, rel_obj):
         common_src = self.graphs.common_favorties_nodes(username1,username2)
         # Get the nodes for each user
         users = [self.graphs.get_node(username1),self.graphs.get_node(username2)]
@@ -430,11 +608,11 @@ class Module(BaseModule):
                 favorites = self.graphs.get_all_favorites_from_src(user,src)
                 rel_obj.set_common_src_favorites(user,src,favorites)
 
-    def comment_analysis(self,username1,username2,rel_obj):
-        self.direct_comment(username1,username2,rel_obj)
-        self.common_source_comment(username1,username2,rel_obj)
+    def comment_pair_analysis(self, username1, username2, rel_obj):
+        self.direct_pair_comment(username1, username2, rel_obj)
+        self.common_source_pair_comment(username1, username2, rel_obj)
 
-    def direct_comment(self,username1,username2,rel_obj):
+    def direct_pair_comment(self, username1, username2, rel_obj):
         u1_comment_u2 = self.graphs.commented(username1,username2)
         u2_comment_u1 = self.graphs.commented(username2,username1)
         if u1_comment_u2:
@@ -444,7 +622,7 @@ class Module(BaseModule):
             comments = u2_comment_u1
             rel_obj.set_comment(username2,username1,comments)
 
-    def common_source_comment(self,username1,username2,rel_obj):
+    def common_source_pair_comment(self, username1, username2, rel_obj):
         self.debug("Started commmon source comment analysis..")
         common_src = self.graphs.common_comment_nodes(username1,username2)
         # Get the nodes for each user
@@ -475,6 +653,17 @@ class Module(BaseModule):
         report_file = os.path.join(reports_path,f'{filename}.txt')
         with open(report_file, 'a') as file:
             file.write(str(report_obj))
+
+    def generate_common_reports(self,user_reports,dirname,filename):
+        reports_path = os.path.join(self.session_path, dirname)
+        if not os.path.exists(reports_path):
+            os.makedirs(reports_path,mode=0o777)
+        report_file = os.path.join(reports_path,f'{filename}.txt')
+        with open(report_file, 'a') as file:
+            file.write(f"Relevant users ordered by {self.options['order_by']}\n\n")
+            for user_report in user_reports:
+                file.write(str(user_report))
+
 
 ################################### ENDOF REPORT METHODS ##############################
 

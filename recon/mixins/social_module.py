@@ -49,6 +49,13 @@ class SocialModule(ABC,BaseModule):
             ('sleep_time', 5, False, 'Set how much time to sleep if rate limit is reached, default is 2 minutes, max is 15'),
             ('analysis_recon', False, False, 'Used by the analysis module to fetch and synthesize info <not meant to be used as a standalone command>'),
             ('optimize', True, False, 'Set to True to avoid running recon on users already in database'),
+            ('user_followers', False, False, 'Set to true to enable collection of user followers'),
+            ('user_friends', False, False, 'Set to true to enable collection of user friends'),
+            ('user_timeline', False, False, 'Set to true to enable collection of user timeline'),
+            ('user_favorites', False, False, 'Set to true to enable collection of user\'s liked posts'),
+            ('user_reshares', False, False, 'Set to true to enable collection of user\'s shared posts'),
+            ('user_mentions', False, False, 'Set to true to enable collection of user\'s mentions'),
+            ('user_comments', False, False, 'Set to true to enable collection of user\'s comments'),
         ),
     }
 
@@ -773,13 +780,18 @@ class SocialModule(ABC,BaseModule):
                 for handle in self.handles:
                     self.username = handle
                     self.add_user_info(self.username)
-                    self.add_user_friends(self.username)
-                    self.add_user_followers(self.username)
-                    self.add_user_posts(self.username)
-                    self.add_user_favorites(self.username)
-                    self.add_user_reshares(self.username)
-                    self.add_user_mentions(self.username)
-                    self.add_user_comments(self.username)
+                    if self.options['user_friends']:
+                        self.add_user_friends(self.username)
+                    if self.options['user_followers']:
+                        self.add_user_followers(self.username)
+                    if self.options['user_timeline'] or self.options['user_mentions'] or self.options['user_reshares']:
+                        self.add_user_posts(self.username)
+                        self.add_user_reshares(self.username)
+                        self.add_user_mentions(self.username)
+                    if self.options['user_favorites']:
+                        self.add_user_favorites(self.username)
+                    if self.options['user_comments']:
+                        self.add_user_comments(self.username)
                 self.output("Done. Information stored in database.")
         except:
             traceback.print_exc()

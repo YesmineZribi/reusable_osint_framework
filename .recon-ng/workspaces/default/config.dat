@@ -29,7 +29,7 @@
         "DEFAULT": true
     },
     "base": {
-        "VERBOSITY": 0
+        "VERBOSITY": 1
     },
     "analysis/social_analysis": {
         "SOURCE_TYPE": "screen_name",

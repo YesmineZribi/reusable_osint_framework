@@ -38,10 +38,6 @@ class Module(SocialModule):
         ),
         'options': SocialModule.meta['options'] + (
             ('user_info', True, False, 'Set to true to enable collection of user account info'),
-            ('user_followers', False, False, 'Set to true to enable collection of user followers'),
-            ('user_friends', False, False, 'Set to true to enable collection of user friends'),
-            ('user_timeline', False, False, 'Set to true to enable collection of user timeline'),
-            ('user_favorites', False, False, 'Set to true to enable collection of user\'s liked posts'),
             ('users_lookup', False, False, 'Set to true to enable lookup of up to 100 users'),
             ('enable_fetch_all', False, False, 'Set to true to enable bulk account fetching (required to use analysis module)'),
             ('cursor', -1, False, 'Breaks result into pages, -1 to start from first page'),

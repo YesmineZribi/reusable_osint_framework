@@ -7,11 +7,66 @@ from collections import defaultdict
 
 class UserReport(framework.Framework):
 
-    def __init__(self,user,measures):
+    def __init__(self,user,**kwargs):
         framework.Framework.__init__(self, 'social_report')
 
         self.user = user
-        self.measures = measures
+        self.measures = kwargs.get('measures',{})
+        # the targets this user follows
+        self.target_friends = kwargs.get('target_friends', [])
+        # the targets following this user
+        self.target_followers = kwargs.get('target_followers', [])
+        # Targets that mentioned this user
+        self.mentions_by_targets = kwargs.get('mentions_by_targets', {})
+        # Targets that were mentioned by this user
+        self.target_mentions = kwargs.get('target_mentions', {})
+        # Targets that reshared this user's posts
+        self.reshares_by_targets = kwargs.get('reshares_by_targets', {})
+        # Targets that were reshared by this user
+        self.target_reshares = kwargs.get('target_reshares', {})
+        # Targets that liked this user's posts
+        self.favorites_by_targets = kwargs.get('favorites_by_targets', {})
+        # Targets whose posts were like by this user
+        self.target_favorites = kwargs.get('target_favorites', {})
+        # Targets that commented on this user's posts
+        self.comments_by_targets = kwargs.get('comments_by_targets', {})
+        # Targets whose posts this user commented on
+        self.target_comments = kwargs.get('target_comments', {})
+        # Critical posts
+        self.critical_posts = kwargs.get("critical_posts",[])
+
+
+    def target_friends_num(self):
+        return len(self.target_friends)
+
+    def target_followers_num(self):
+        return len(self.target_followers)
+
+    def mentions_by_targets_num(self):
+        return len(self.mentions_by_targets)
+
+    def target_mentions_num(self):
+        return len(self.target_mentions)
+
+    def reshares_by_targets_num(self):
+        return len(self.reshares_by_targets)
+
+    def target_reshares_num(self):
+        return len(self.target_reshares)
+
+    def favorites_by_targets_num(self):
+        return len(self.favorites_by_targets)
+
+    def target_favorites_num(self):
+        return len(self.target_favorites)
+
+    def comments_by_targerts_num(self):
+        return len(self.comments_by_targets)
+
+    def target_comments_num(self):
+        return len(self.target_comments)
+
+
 
     def graph_metric_format(self,graph_name,metrics):
         string_rep = f"Node metrics in {graph_name}\n"
@@ -20,12 +75,86 @@ class UserReport(framework.Framework):
         return string_rep
 
 
+    def __eq__(self,user):
+        return self.user == user
+
+
     def __repr__(self):
-        string_rep = f"User screen name: {self.user.screen_name}\n"
-        string_rep = f"User id: {self.user.id}\n"
+        screen_name = self.user.screen_name
+        string_rep = f"User screen name: {screen_name}\n"
+        string_rep += f"User id: {self.user.id}\n"
         for graph_name,metric_dict in self.measures.items():
             string_rep += self.graph_metric_format(graph_name,metric_dict)
             string_rep += "\n\n"
+
+        if self.target_followers:
+            string_rep += f"{screen_name} is followed by: \n"
+            for follower in self.target_followers:
+                string_rep += f"{follower}\n"
+            string_rep += "\n\n"
+
+        if self.target_friends:
+            string_rep += f"{screen_name} follows: \n"
+            for friend in self.target_friends:
+                string_rep += f"{friend}\n"
+            string_rep += "\n\n"
+
+        if self.mentions_by_targets:
+            string_rep += f"{screen_name} has been mentioned by: \n"
+            for mentioner,num in self.mentions_by_targets.items():
+                string_rep += f"{mentioner}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.target_mentions:
+            string_rep += f"{screen_name} mentioned: \n"
+            for mentioned, num in self.target_mentions.items():
+                string_rep += f"{mentioned}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.reshares_by_targets:
+            string_rep += f"{screen_name} has had posts shared by: \n"
+            for resharer, num in self.reshares_by_targets.items():
+                string_rep += f"{resharer}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.target_reshares:
+            string_rep += f"{screen_name} shared posts from: \n"
+            for reshared, num in self.target_reshares.items():
+                string_rep += f"{reshared}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.favorites_by_targets:
+            string_rep += f"{screen_name} has had posts liked by: \n"
+            for user, num in self.favorites_by_targets.items():
+                string_rep += f"{user}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.target_favorites:
+            string_rep += f"{screen_name} liked posts by: \n"
+            for user, num in self.target_favorites.items():
+                string_rep += f"{user}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.comments_by_targets:
+            string_rep += f"{screen_name} had comments by: \n"
+            for user, num in self.comments_by_targets.items():
+                string_rep += f"{user}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.target_comments:
+            string_rep += f"{screen_name} commented on posts by: \n"
+            for user, num in self.target_comments.items():
+                string_rep += f"{user}: {num}\n"
+            string_rep += "\n\n"
+
+        if self.critical_posts:
+            string_rep += f"Found {len(self.critical_posts)} posts made by {screen_name} that matched the given keywrods: \n"
+            for post in self.critical_posts:
+                string_rep += "Post:\n"
+                string_rep += f"\t{post}\n"
+            string_rep += "\n\n"
+
+        string_rep += "---------------------------------------\n"
         return string_rep
 
 class RelationshipReport(framework.Framework):
