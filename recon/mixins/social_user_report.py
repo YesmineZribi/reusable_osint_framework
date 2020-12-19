@@ -11,61 +11,39 @@ class UserReport(framework.Framework):
         framework.Framework.__init__(self, 'social_report')
 
         self.user = user
-        self.measures = kwargs.get('measures',{})
-        # the targets this user follows
-        self.target_friends = kwargs.get('target_friends', [])
-        # the targets following this user
-        self.target_followers = kwargs.get('target_followers', [])
-        # Targets that mentioned this user
-        self.mentions_by_targets = kwargs.get('mentions_by_targets', {})
-        # Targets that were mentioned by this user
-        self.target_mentions = kwargs.get('target_mentions', {})
-        # Targets that reshared this user's posts
-        self.reshares_by_targets = kwargs.get('reshares_by_targets', {})
-        # Targets that were reshared by this user
-        self.target_reshares = kwargs.get('target_reshares', {})
-        # Targets that liked this user's posts
-        self.favorites_by_targets = kwargs.get('favorites_by_targets', {})
-        # Targets whose posts were like by this user
-        self.target_favorites = kwargs.get('target_favorites', {})
-        # Targets that commented on this user's posts
-        self.comments_by_targets = kwargs.get('comments_by_targets', {})
-        # Targets whose posts this user commented on
-        self.target_comments = kwargs.get('target_comments', {})
-        # Critical posts
-        self.critical_posts = kwargs.get("critical_posts",[])
+        self.attribute_names = []
+
+        for key, value in kwargs.items():
+            setattr(self,key,value)
+            self.attribute_names.append(key)
+
+        # self.measures = kwargs.get('measures',{})
+        # # the targets this user follows
+        # self.target_friends = kwargs.get('target_friends', [])
+        # # the targets following this user
+        # self.target_followers = kwargs.get('target_followers', [])
+        # # Targets that mentioned this user
+        # self.mentions_by_targets = kwargs.get('mentions_by_targets', {})
+        # # Targets that were mentioned by this user
+        # self.target_mentions = kwargs.get('target_mentions', {})
+        # # Targets that reshared this user's posts
+        # self.reshares_by_targets = kwargs.get('reshares_by_targets', {})
+        # # Targets that were reshared by this user
+        # self.target_reshares = kwargs.get('target_reshares', {})
+        # # Targets that liked this user's posts
+        # self.favorites_by_targets = kwargs.get('favorites_by_targets', {})
+        # # Targets whose posts were like by this user
+        # self.target_favorites = kwargs.get('target_favorites', {})
+        # # Targets that commented on this user's posts
+        # self.comments_by_targets = kwargs.get('comments_by_targets', {})
+        # # Targets whose posts this user commented on
+        # self.target_comments = kwargs.get('target_comments', {})
+        # # Critical posts
+        # self.critical_posts = kwargs.get("critical_posts",[])
 
 
-    def target_friends_num(self):
-        return len(self.target_friends)
-
-    def target_followers_num(self):
-        return len(self.target_followers)
-
-    def mentions_by_targets_num(self):
-        return len(self.mentions_by_targets)
-
-    def target_mentions_num(self):
-        return len(self.target_mentions)
-
-    def reshares_by_targets_num(self):
-        return len(self.reshares_by_targets)
-
-    def target_reshares_num(self):
-        return len(self.target_reshares)
-
-    def favorites_by_targets_num(self):
-        return len(self.favorites_by_targets)
-
-    def target_favorites_num(self):
-        return len(self.target_favorites)
-
-    def comments_by_targerts_num(self):
-        return len(self.comments_by_targets)
-
-    def target_comments_num(self):
-        return len(self.target_comments)
-
+    def get_var(self,var_name):
+        return getattr(self,var_name,None)
 
 
     def graph_metric_format(self,graph_name,metrics):
@@ -79,77 +57,135 @@ class UserReport(framework.Framework):
         return self.user == user
 
 
+    def format_dict(self,var_name,var_dict, spacer):
+        print("VAR NAME: ", var_name)
+        string_rep = f"VAR NAME: {var_name}\n"
+        for key,value in var_dict.items():
+            string_rep += f"{spacer}{key}: "
+            if isinstance(value,dict):
+                spacer += "\t"
+                string_rep += "\n"
+                string_rep += self.format_dict("",value,spacer)
+            elif iter(value):
+                spacer += "\t"
+                string_rep += "\n"
+                string_rep += self.format_list("",value,spacer)
+            else: # ints, floats, objects of whatever type
+                string_rep += f"{str(value)}\n"
+        return string_rep
+
+    def format_list(self, var_name, lst,spacer):
+        string_rep = f"VAR NAME: {var_name}\n"
+        for item in lst:
+            print(item)
+            if isinstance(item,dict):
+                spacer += "\t"
+                string_rep += "\n"
+                string_rep += self.format_dict("",item,spacer)
+            elif iter(item):
+                spacer += "\t"
+                string_rep += "\n"
+                string_rep += self.format_list("",item,spacer)
+            else:
+                string_rep += f"{spacer}{str(item)}\n"
+        return string_rep
+
     def __repr__(self):
         screen_name = self.user.screen_name
         string_rep = f"User screen name: {screen_name}\n"
         string_rep += f"User id: {self.user.id}\n"
-        for graph_name,metric_dict in self.measures.items():
+        #TODO: Support printing dynamic data in a ice way
+
+        # for var_name in self.attribute_names:
+        #     var = getattr(self,var_name,None)
+        #     try:
+        #         if isinstance(var, dict):
+        #             self.format_dict(var_name, var,"")
+        #         elif iter(var):
+        #             self.format_list(var_name, var,"")
+        #     except TypeError:
+        #         string_rep += f"{var}\n"
+        # return string_rep
+
+        measures = getattr(self, "measures", {})
+        for graph_name,metric_dict in measures.items():
             string_rep += self.graph_metric_format(graph_name,metric_dict)
             string_rep += "\n\n"
 
-        if self.target_followers:
+        target_followers = getattr(self, "target_followers", [])
+        if target_followers:
             string_rep += f"{screen_name} is followed by: \n"
-            for follower in self.target_followers:
+            for follower in target_followers:
                 string_rep += f"{follower}\n"
             string_rep += "\n\n"
 
-        if self.target_friends:
+        target_friends = getattr(self, "target_friends", [])
+        if target_friends:
             string_rep += f"{screen_name} follows: \n"
-            for friend in self.target_friends:
+            for friend in target_friends:
                 string_rep += f"{friend}\n"
             string_rep += "\n\n"
 
-        if self.mentions_by_targets:
+        mentions_by_targets = getattr(self, "mentions_by_targets", {})
+        if mentions_by_targets:
             string_rep += f"{screen_name} has been mentioned by: \n"
-            for mentioner,num in self.mentions_by_targets.items():
+            for mentioner,num in mentions_by_targets.items():
                 string_rep += f"{mentioner}: {num}\n"
             string_rep += "\n\n"
 
-        if self.target_mentions:
+        target_mentions = getattr(self, "target_mentions", {})
+        if target_mentions:
             string_rep += f"{screen_name} mentioned: \n"
-            for mentioned, num in self.target_mentions.items():
+            for mentioned, num in target_mentions.items():
                 string_rep += f"{mentioned}: {num}\n"
             string_rep += "\n\n"
 
-        if self.reshares_by_targets:
+        reshares_by_targets = getattr(self, "reshares_by_targets", {})
+        if reshares_by_targets:
             string_rep += f"{screen_name} has had posts shared by: \n"
-            for resharer, num in self.reshares_by_targets.items():
+            for resharer, num in reshares_by_targets.items():
                 string_rep += f"{resharer}: {num}\n"
             string_rep += "\n\n"
 
-        if self.target_reshares:
+        target_reshares = getattr(self, "target_reshares", {})
+        if target_reshares:
             string_rep += f"{screen_name} shared posts from: \n"
-            for reshared, num in self.target_reshares.items():
+            for reshared, num in target_reshares.items():
                 string_rep += f"{reshared}: {num}\n"
             string_rep += "\n\n"
 
-        if self.favorites_by_targets:
+        favorites_by_targets = getattr(self,"favorites_by_targets", {})
+        if favorites_by_targets:
             string_rep += f"{screen_name} has had posts liked by: \n"
-            for user, num in self.favorites_by_targets.items():
+            for user, num in favorites_by_targets.items():
                 string_rep += f"{user}: {num}\n"
             string_rep += "\n\n"
 
-        if self.target_favorites:
+        target_favorites = getattr(self, "target_favorites", {})
+        if target_favorites:
             string_rep += f"{screen_name} liked posts by: \n"
-            for user, num in self.target_favorites.items():
+            for user, num in target_favorites.items():
                 string_rep += f"{user}: {num}\n"
             string_rep += "\n\n"
 
-        if self.comments_by_targets:
+        comments_by_targets = getattr(self, "comments_by_targets", {})
+        if comments_by_targets:
             string_rep += f"{screen_name} had comments by: \n"
-            for user, num in self.comments_by_targets.items():
+            for user, num in comments_by_targets.items():
                 string_rep += f"{user}: {num}\n"
             string_rep += "\n\n"
 
-        if self.target_comments:
+        target_comments = getattr(self, "target_comments", {})
+        if target_comments:
             string_rep += f"{screen_name} commented on posts by: \n"
-            for user, num in self.target_comments.items():
+            for user, num in target_comments.items():
                 string_rep += f"{user}: {num}\n"
             string_rep += "\n\n"
 
-        if self.critical_posts:
-            string_rep += f"Found {len(self.critical_posts)} posts made by {screen_name} that matched the given keywrods: \n"
-            for post in self.critical_posts:
+        critical_posts = getattr(self, "critical_posts", [])
+        if critical_posts:
+            string_rep += f"Found {len(critical_posts)} posts made by {screen_name} that matched the given keywrods: \n"
+            for post in critical_posts:
                 string_rep += "Post:\n"
                 string_rep += f"\t{post}\n"
             string_rep += "\n\n"

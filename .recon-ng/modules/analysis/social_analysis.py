@@ -54,6 +54,9 @@ class Module(BaseModule):
 
 
     def module_pre(self):
+        """
+        Runs prior to running the module
+        """
         # Ensure source_type is valid and usernames are valid
         if self.options['source_type'] not in ['id', 'screen_name']:
             self.error('Illegal source type pick either id or screen_name')
@@ -138,6 +141,9 @@ class Module(BaseModule):
         self.pair_reports = []
 
     def module_run(self):
+        """
+        Runs when the run command is executed
+        """
         self.output("Initiating analysis...")
         dirname = f"{self.options['recon_module']}_network_reports"
         filename = f"network_report"
@@ -169,6 +175,9 @@ class Module(BaseModule):
         self.output(f"results stored in {self.session_path}")
 
     def get_usernames(self, users):
+        """
+        Returns the string representation of the users' id/screen_name
+        """
         usernames = ""
         for i, user in enumerate(users):
             # Call right method to get username (screen_name/id) based on user choice
@@ -181,6 +190,9 @@ class Module(BaseModule):
 
     # TODO: Implement recursive fetching
     def fetch_bulk_account_recursive(self,users, stp_lvl=1, recur_lvl=0):
+        """
+        Recursively fetches users' data (recursion in development, not yet added to the SocialGraph"
+        """
         usernames = self.get_usernames(users)
         # Do recon on the usernames
         self.fetch_bulk_account_info(usernames)
@@ -202,6 +214,10 @@ class Module(BaseModule):
                 self.fetch_bulk_account_recursive(friends,stp_lvl,recur_lvl)
 
     def fetch_bulk_account_info(self,usernames):
+        """
+        None recursive version to fetch user info using the recon module (should be used for now instead of
+        recursive version
+        """
         if not usernames:
             return
         # Create temp file to store commands
@@ -226,6 +242,9 @@ class Module(BaseModule):
 
 ############################### ANALYSIS METHODS ####################################
     def single_user_analysis(self):
+        """
+        Performs single user analysis, will generate a report for each user
+        """
         self.debug("Started user analysis....")
         # Name of dir under which to store reports
         dirname = f"{self.options['recon_module']}_single_reports"
@@ -249,6 +268,9 @@ class Module(BaseModule):
         self.debug("Generating user reports...")
 
     def relationship_pair_analysis(self):
+        """
+        Performs relationship analysis
+        """
         # directory under which to save relationship reports
         dirname = f"{self.options['recon_module']}_relationship_reports"
         # Iterate over each pair of users and analyse relationship
@@ -298,6 +320,9 @@ class Module(BaseModule):
             rel_obj.print_summary()
 
     def network_relationship_analysis(self):
+        """
+        Performs commons analysis
+        """
         user_reports = []
         for user in self.commons:
             user_report = self.get_user_report(user)
@@ -305,16 +330,16 @@ class Module(BaseModule):
 
         # Order based on user input
         if self.options['order_by'] == "followers":
-            user_reports.sort(key=lambda x: x.target_followers_num(), reverse=True)
+            user_reports.sort(key=lambda x: len(x.get_var("target_followers")), reverse=True)
 
         elif self.options['order_by'] == "friends":
-            user_reports.sort(key=lambda x: x.target_friends_num(), reverse=True)
+            user_reports.sort(key=lambda x: len(x.get_var("target_friends")), reverse=True)
 
         elif self.options['order_by'] == "mentions":
-            user_reports.sort(key=lambda x: x.target_mentions_num(), reverse=True)
+            user_reports.sort(key=lambda x: len(x.get_var("target_mentions")), reverse=True)
 
         elif self.options['order_by'] == "reshares":
-            user_reports.sort(key=lambda x: x.target_reshares_num(), reverse=True)
+            user_reports.sort(key=lambda x: len(x.get_var("target_reshares")), reverse=True)
 
         dirname = f"{self.options['recon_module']}_common_users_reports"
         filename = "relevant_network_users"
@@ -323,6 +348,9 @@ class Module(BaseModule):
 
 
     def graph_structure_analysis(self,graph_name, graph_report):
+        """
+        Performs graph structure analysis
+        """
         # Get density of the graph
         graph_density = self.graphs.density(graph_name)
         graph_triadic_closure = self.graphs.triadic_closure(graph_name)
@@ -332,6 +360,9 @@ class Module(BaseModule):
         graph_report.set_triadic_closure(graph_triadic_closure)
 
     def graph_node_analysis(self, graph_name, graph_report):
+        """
+        Performs node analysis
+        """
         self.debug(f"{graph_name} important nodes:")
         # Get hubs -> highest centrality
         graph_report.set_hubs(self.graphs.get_top_nodes(graph_name, "centrality", self.options['top']))
@@ -344,6 +375,9 @@ class Module(BaseModule):
         self.debug(f"Influencers: {graph_report.influencers}")
 
     def graph_community_analysis(self, graph_name, graph_report):
+        """
+        Performs community analysis
+        """
         #self.graphs.graph_modularity("connections")
         num_of_communities = self.graphs.graph_best_partition(graph_name)
         for i in range(0,num_of_communities):
@@ -355,19 +389,22 @@ class Module(BaseModule):
 ################## RELATIONSHIP ANALYSIS HELPERS ####################################
 
     def get_user_report(self,user):
+        """
+        Getter for user reports
+        """
         user.enable_fetch("twitter_user")
         # Get target users this user follows
         target_friends = self.get_target_friends(user)
         # Get target users that follow this user
         target_followers = self.get_target_followers(user)
         # Get target users that mentioned this user
-        # mentions_by_targets = self.get_mentions_by_targets(user)
-        # # Get target users mentioned by this user
-        # target_mentions = self.get_target_mentions(user)
-        # # Get target users that shared posts from this user
-        # reshares_by_targets = self.get_reshares_by_targets(user)
-        # # Get target users whose posts this user shared
-        # target_reshares = self.get_target_reshares(user)
+        mentions_by_targets = self.get_mentions_by_targets(user)
+        # Get target users mentioned by this user
+        target_mentions = self.get_target_mentions(user)
+        # Get target users that shared posts from this user
+        reshares_by_targets = self.get_reshares_by_targets(user)
+        # Get target users whose posts this user shared
+        target_reshares = self.get_target_reshares(user)
         # Get critical posts
         if self.options['keywords']:
             critical_posts = self.search_user_posts(user, self.keywords)
@@ -376,10 +413,10 @@ class Module(BaseModule):
 
         user_report = UserReport(user, target_friends=target_friends,
                                  target_followers=target_followers,
-                                 # mentions_by_targets=mentions_by_targets,
-                                 # target_mentions=target_mentions,
-                                 # reshares_by_targets=reshares_by_targets,
-                                 # target_reshares=target_reshares,
+                                 mentions_by_targets=mentions_by_targets,
+                                 target_mentions=target_mentions,
+                                 reshares_by_targets=reshares_by_targets,
+                                 target_reshares=target_reshares,
                                  critical_posts=critical_posts
                                  )
 
